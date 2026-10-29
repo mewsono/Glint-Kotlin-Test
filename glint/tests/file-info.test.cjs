@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+const ctx=vm.createContext({window:{},localStorage:{getItem:()=>null},sessionStorage:{getItem:()=>null},URL,URLSearchParams});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../sources.js'),'utf8'),ctx);
+const info=p=>JSON.parse(vm.runInContext(`JSON.stringify(pbPostFileInfo(${JSON.stringify(p)}))`,ctx));
+assert.deepEqual(info({meta:{file_size:2500000,file_ext:'png'}}),{fileSize:2500000,fileType:'PNG',fileInfoReady:true});
+assert.deepEqual(info({meta:{file:{size:2097152,ext:'jpg'}}}),{fileSize:2097152,fileType:'JPEG',fileInfoReady:true});
+assert.deepEqual(info({meta:{file_size:1000,file_ext:'.webp'}}),{fileSize:1000,fileType:'WEBP',fileInfoReady:true});
+assert.equal(info({meta:{mime_type:'image/jpeg'}}).fileType,'JPEG');
+assert.equal(info({orig:'./api/proxy?u='+encodeURIComponent('https://cdn.donmai.us/original/pic.png')}).fileType,'PNG');
+assert.equal(info({meta:{file_size:1234,sample_file_size:600}}).fileSize,1234);
+assert.equal(info({meta:{file_size:0}}).fileSize,null);
+assert.equal(info({meta:{file_size:-3}}).fileSize,null);
+assert.deepEqual(info({}),{fileSize:null,fileType:'',fileInfoReady:false});
+console.log('PASS: original file size, format/MIME normalization, proxied media extensions and honest missing-data handling.');

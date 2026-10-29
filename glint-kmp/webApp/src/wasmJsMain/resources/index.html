@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0a0e">
+  <title>Glint</title>
+  <link rel="icon" href="icons/favicon-64.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0a0e; overflow: hidden; }
+    #glint-loading {
+      position: fixed; inset: 0; display: flex; flex-direction: column; gap: 14px;
+      align-items: center; justify-content: center; color: #8e8895;
+      font: 15px system-ui, sans-serif; background: #0b0a0e; z-index: 10;
+      transition: opacity .4s ease;
+    }
+    #glint-loading .ring {
+      width: 30px; height: 30px; border-radius: 50%;
+      border: 3px solid #211e27; border-top-color: #f3c25e;
+      animation: spin .9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div id="glint-loading"><div class="ring"></div><div>Loading Glint…</div></div>
+<script>
+  // Optional proxy override for the web preview (defaults to localhost:8081).
+  // window.GLINT_PROXY = "http://localhost:8081/api/proxy";
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+</script>
+<script src="glint.js"></script>
+<script>
+  // The wasm app replaces the body content once it boots.
+  var hide = function () {
+    var el = document.getElementById('glint-loading');
+    if (el) { el.style.opacity = '0'; setTimeout(function () { el.remove(); }, 450); }
+  };
+  setTimeout(hide, 4000);
+  addEventListener('pointerdown', hide, { once: true });
+</script>
+</body>
+</html>

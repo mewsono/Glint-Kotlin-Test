@@ -1,0 +1,1004 @@
+:root{--bg:#000;--tx:#fff;--mu:#9b9b9b;--chip:#3a3a3a;--nav:#2a2a2a;--ph:#2d2d2b;--sh:#1f1f1f;--ac:#e60023;--bd:#9a9a9a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
+:root[data-theme="light"]{--bg:#fff;--tx:#111;--mu:#767676;--chip:#e9e9e9;--nav:#efefef;--ph:#e4e4e4;--sh:#fff;--bd:#999;color-scheme:light}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font-family:Roboto,"Segoe UI",system-ui,-apple-system,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center}
+#app{max-width:430px;margin:0 auto;min-height:100vh;padding-bottom:120px;position:relative}
+.stk{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:10}
+.hdh{display:flex;align-items:center;height:66px;padding:14px 28px 0 17px}
+.brand{flex:1;font-size:22px;font-weight:700;letter-spacing:-.3px}
+.hdh button+button{margin-left:29px}
+.tabs{display:flex;gap:32px;overflow-x:auto;padding:0 17px 15px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tabs button{font-size:18px;font-weight:600;white-space:nowrap;line-height:22px;padding:9px 0 3px;border-bottom:3px solid transparent;border-radius:0}
+.tabs button.on{border-color:var(--tx)}
+.prow{display:flex;align-items:center;height:62px;padding:0 23px 0 9px;gap:0}
+.prow .tabs{padding:0;margin-left:92px;flex:1;overflow:visible;gap:32px;height:60px;align-items:stretch}
+.prow .tabs button{padding:0;height:60px;align-items:center;line-height:1;padding-top:2px}
+.sbar{display:flex;align-items:center;margin:16px 9px 0}
+.search{flex:1;height:53px;border:1.5px solid var(--bd);border-radius:27px;display:flex;align-items:center;gap:13px;padding:0 16px}
+.search input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--tx);font-size:18px;font-family:inherit}
+.search input::placeholder{color:var(--mu)}
+.sbar>button{margin-left:19px;width:28px}
+.chips{display:flex;gap:10px;margin:11px 9px 9px}
+.chip{height:41px;background:var(--chip);border-radius:15px;padding:0 17px;font-size:17px;font-weight:600;gap:11px}
+.chip.on{background:var(--tx);color:var(--bg)}
+.grid{display:flex;gap:5px;padding:0 5px}.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.art{width:100%;border-radius:12px;position:relative;overflow:hidden;display:block}
+.art svg{position:absolute;inset:0;width:100%;height:100%}
+.cap{display:flex;align-items:center;justify-content:space-between;gap:8px;height:42px;padding:2px 9px 0 7px;font-size:14px}
+.cap span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cap button{width:40px;height:34px;margin-right:-8px}
+.hrt{position:absolute;right:9px;top:9px;background:#0008;color:#fff;border-radius:50%;width:28px;height:28px}
+.boards{display:grid;grid-template-columns:1fr 1fr;column-gap:5px;padding:0 5px}
+.bc{cursor:pointer;margin-bottom:17px;min-width:0}
+.mos{display:grid;grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;gap:1px;aspect-ratio:1.5;border-radius:14px;overflow:hidden;position:relative;background:#000}
+.mos>div:first-of-type{grid-row:span 2}.mos>div{background:var(--ph);position:relative;overflow:hidden}
+.mos .art{border-radius:0;height:100%;position:absolute;inset:0}
+.lk{position:absolute;left:9px;top:9px;width:28px;height:28px;border-radius:10px;background:#2c2c2ccc;color:#fff;z-index:2}
+.bt{font-size:17px;font-weight:700;line-height:20px;margin:5px 9px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bs{font-size:14.5px;line-height:18px;margin:4px 9px 0;font-weight:500}.bs em{font-style:normal;color:var(--mu);margin-left:7px}
+nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));display:flex;gap:10px;z-index:30}
+nav button{width:59px;height:58px;border-radius:20px;background:var(--nav);color:var(--tx);box-shadow:0 2px 10px #0005}
+.ring{border:2px solid var(--tx);border-radius:50%;padding:2px;display:flex;position:relative}
+/* The profile avatar doubles as the Google Drive sync light (v65.21):
+   steady red  = sync is off, or Drive needs attention
+   turning green = a sync is in flight
+   steady green = this device and Drive agree                                    */
+.ring[data-drive-ring]{transition:border-color .18s ease}
+.ring[data-drive-ring="off"],.ring[data-drive-ring="error"]{border-color:#e5484d}
+.ring[data-drive-ring="ok"]{border-color:#2fbf71}
+/* Only the ring turns, never the face: the spinning arc is a pseudo-element. */
+.ring[data-drive-ring="busy"]{border-color:transparent}
+.ring[data-drive-ring="busy"]::after{content:"";position:absolute;inset:-2px;border-radius:50%;border:2px solid #2fbf71;border-top-color:transparent;animation:pbDriveSpin .9s linear infinite}
+@keyframes pbDriveSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){
+  .ring[data-drive-ring="busy"]::after{animation:none;border-color:#2fbf71;border-top-color:rgba(47,191,113,.28)}
+}
+.av{border-radius:50%;display:block}
+.ov{position:fixed;inset:0;background:#000a;z-index:50;display:none;align-items:flex-end;justify-content:center}.ov.show{display:flex}
+.sheet{background:var(--sh);width:100%;max-width:430px;border-radius:28px 28px 0 0;padding:10px 18px calc(24px + env(safe-area-inset-bottom,0px));max-height:92vh;overflow:auto;position:relative}
+.sheet.full{height:100vh;max-height:none;border-radius:0;padding:0 0 30px}
+.sheet::before{content:"";display:block;width:40px;height:4px;border-radius:2px;background:var(--mu);opacity:.6;margin:0 auto 14px}.sheet.full::before{display:none}
+.sheet h2{margin:0 0 14px;font-size:20px;text-align:center}
+.field{width:100%;background:var(--chip);border:0;border-radius:14px;padding:15px;color:var(--tx);font-size:17px;margin-bottom:12px;outline:0;font-family:inherit}
+.btn{background:var(--ac);color:#fff;border-radius:26px;padding:14px 22px;font-weight:700;width:100%;font-size:17px;margin-top:6px}.btn.alt{background:var(--chip);color:var(--tx)}
+.li{display:flex;align-items:center;gap:12px;padding:9px 0;min-height:60px;cursor:pointer}.li b{flex:1;font-size:17px;font-weight:600}
+.th{width:48px;height:48px;border-radius:12px;overflow:hidden;position:relative;background:var(--ph);flex:none}.th .art{height:100%;border-radius:0}
+.sv{background:var(--ac);color:#fff;border-radius:20px;padding:10px 18px;font-weight:700;font-size:15px}.sv.d{background:var(--chip);color:var(--tx)}
+.sw{width:52px;height:32px;border-radius:16px;background:var(--chip);position:relative;flex:none;cursor:pointer}.sw::after{content:"";position:absolute;left:3px;top:3px;width:26px;height:26px;border-radius:50%;background:#fff;transition:.2s}.sw.on{background:var(--ac)}.sw.on::after{left:23px}
+.tiles{display:flex;gap:10px}.tiles button{flex:1;flex-direction:column;gap:10px;background:var(--chip);border-radius:20px;height:96px;font-weight:600;font-size:16px}
+.toast{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);background:var(--tx);color:var(--bg);padding:12px 20px;border-radius:24px;z-index:99;font-weight:600;font-size:15px;opacity:0;transition:.25s;pointer-events:none;white-space:nowrap}.toast.show{opacity:1}
+.empty{color:var(--mu);text-align:center;padding:60px 30px;font-size:16px;line-height:1.5}
+.cl{display:flex;align-items:center;justify-content:space-between;padding:12px 12px;position:sticky;top:0;z-index:3;background:linear-gradient(#0009,#0000);color:#fff}
+.clb{padding:0 10px}.clb .art{border-radius:20px}
+.clt{font-size:21px;font-weight:700;margin:16px 4px 4px}.cls{color:var(--mu);font-size:15px}
+.cla{display:flex;align-items:center;gap:6px;margin:12px 0 0}.cla button{width:46px;height:46px}.cla .sv{margin-left:auto;font-size:17px;padding:13px 24px}
+.sub{display:flex;align-items:center;gap:10px;padding:6px 14px 8px}.sub h1{margin:0;font-size:24px;flex:1}
+
+/* ── PWA additions (install / update / offline UI) ─────────────────── */
+.pwa-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom,0px));z-index:40;display:flex;align-items:center;gap:12px;width:min(398px,calc(100vw - 24px));background:var(--sh);color:var(--tx);border:1px solid var(--chip);border-radius:20px;padding:12px 14px;box-shadow:0 10px 32px #0007}
+.pwa-bar[hidden]{display:none}
+.pwa-bar img{border-radius:11px;flex:none}
+.pwa-bar-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.pwa-bar-tx strong{font-size:16px}
+.pwa-bar-tx span{font-size:13px;color:var(--mu);line-height:1.35}
+.pwa-bar-btn{background:var(--ac);color:#fff;border-radius:20px;padding:10px 18px;font-weight:700;font-size:15px;flex:none}
+.pwa-bar-x{width:32px;height:32px;flex:none;color:var(--mu);font-size:15px}
+/* v65.15 — the notice is information, not a wall: it must never swallow a tap. */
+.offline-bar{position:fixed;pointer-events:none;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:45;background:var(--tx);color:var(--bg);font-size:14px;font-weight:600;padding:9px 16px;border-radius:20px;white-space:nowrap;box-shadow:0 4px 18px #0006}
+.offline-bar[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ── Reference-match polish v2 (from user's Home + Boards screenshots) ──
+   Larger radii, 8px gutters, taller search/chips, chunkier badges/nav.
+   Scoped so the light theme keeps its original colors. */
+:root:not([data-theme="light"]){--nav:#242424;--chip:#3e3e3b;--ph:#2e2e2a}
+
+/* Home header + tabs */
+.hdh{height:60px;padding:12px 20px 0 16px}
+.brand{font-size:21px}
+.hdh button+button{margin-left:24px}
+.tabs{gap:30px;padding:0 16px 12px}
+.tabs button{font-size:19px;letter-spacing:-.2px;padding:8px 0 7px}
+.tabs button.on{border-bottom-width:3px}
+
+/* All feeds: image-only masonry, tight gutters and subtly rounded corners. */
+.grid{gap:4px;padding:0 4px}
+.col{gap:4px}
+.art{border-radius:12px}
+.art:active{transform:scale(.985)}
+.art{transition:transform .12s ease}
+.cap{height:40px;font-size:15px;font-weight:500;padding:4px 4px 6px 5px}
+.hrt{right:10px;top:10px;width:30px;height:30px}
+
+/* Profile / Boards header (now Pins · Boards · Collages) */
+.prow{height:70px;padding:6px 18px 0 12px}
+.prow .tabs{margin-left:16px;gap:22px;overflow-x:auto;padding:0}
+.prow .tabs button{font-size:19px;padding:2px 5px 0;height:62px}
+
+/* Search pill + create button */
+.sbar{margin:14px 10px 0}
+.search{height:56px;border-radius:30px;padding:0 18px;gap:12px}
+.search input{font-size:19px}
+.sbar>button{margin-left:14px;width:34px}
+
+/* Filter chips */
+.chips{gap:10px;margin:13px 10px 14px}
+.chip{height:47px;border-radius:17px;padding:0 20px;font-size:18px}
+
+/* Board cards: rounder covers, bigger lock badge, roomier titles */
+.boards{column-gap:8px;padding:0 8px}
+.bc{margin-bottom:20px}
+.mos{border-radius:18px;gap:2px}
+.lk{left:10px;top:10px;width:36px;height:36px;border-radius:12px;background:#282828c7}
+.bt{font-size:17px;margin:8px 6px 0}
+.bs{font-size:15.5px;margin:3px 6px 0}
+.bs em{margin-left:6px}
+
+/* Floating bottom nav */
+nav{gap:9px;bottom:calc(20px + env(safe-area-inset-bottom,0px))}
+nav button{width:60px;height:60px;border-radius:21px;box-shadow:0 4px 18px #0006}
+
+/* Sheets/dialogs keep in step with the rounder cards */
+.clb .art{border-radius:20px}
+
+button:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+
+/* ── Device scaling v3 — target phone 1080×2412 ──────────────────────
+   Physical 1080×2412 lays out as ~360×804 / 393×877 / 412×919 CSS px
+   (DPR 3 / 2.75 / 2.625). Layout is fluid across all three:
+   full-bleed on phones, 430px column only on desktop-size screens. */
+#app{min-height:100dvh}
+.sheet{max-height:92dvh}
+.sheet.full{height:100dvh}
+@media (max-width:600px){
+  #app{max-width:none;width:100%}
+  .sheet{max-width:none}
+}
+
+/* Type scales gently with viewport width (360 → 412) */
+.tabs button{font-size:clamp(17px,4.8vw,20px)}
+.chip{font-size:clamp(16px,4.5vw,18px)}
+.search input{font-size:clamp(17px,4.7vw,19px)}
+.bt{font-size:clamp(16px,4.3vw,17.5px)}
+.cap{font-size:clamp(14px,3.9vw,15px)}
+
+/* Nothing may overflow horizontally at 360px wide */
+.tabs button,.chip{flex:none}
+.chips{overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.prow>button{flex:none}
+.prow .tabs{min-width:0;flex:1}
+.prow .tabs button{flex:none;font-size:clamp(17px,4.8vw,20px)}
+.sbar,.search{min-width:0}
+.pwa-bar{width:min(406px,calc(100vw - 20px))}
+.toast{max-width:calc(100vw - 32px);white-space:normal;text-align:center}
+
+/* Compact pass for the 360×804 (@3x) layout width */
+@media (max-width:380px){
+  .hdh{padding:12px 16px 0 14px}
+  .hdh button+button{margin-left:18px}
+  .tabs{gap:22px;padding:0 14px 10px}
+  .prow{height:64px;padding:4px 12px 0 10px}
+  .prow .tabs{margin-left:8px;gap:13px}
+  .prow .tabs button{height:56px;padding:2px 3px 0}
+  .search{height:52px}
+  .chip{height:44px;padding:0 15px;border-radius:15px}
+  .chips{margin:11px 8px 12px}
+  .bs{font-size:14px}
+  nav{bottom:calc(16px + env(safe-area-inset-bottom,0px))}
+  nav button{width:56px;height:56px;border-radius:19px}
+  #app{padding-bottom:108px}
+}
+
+/* ── Overlap fix v4 — profile header (tabs + gear) ──
+   Was: one flex row; wide phone fonts let the last tab slide under the gear.
+   Now: 2-column grid. The gear owns a fixed 44px column, the tabs live in
+   a minmax(0,1fr) column and can only scroll inside it (with an end fade),
+   so tab text can never reach the gear. (The avatar column was removed in
+   v19, so the tabs now start at the left edge.) */
+.prow{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 44px;
+  column-gap:10px;
+  align-items:center;
+  height:70px;
+  padding:6px 10px 0 16px;
+}
+.prow .tabs{
+  margin-left:0;
+  min-width:0;
+  height:62px;
+  gap:14px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 16px),transparent);
+          mask-image:linear-gradient(to right,#000 calc(100% - 16px),transparent);
+}
+/* guaranteed breathing room at the scroll-end (right padding is unreliable
+   inside scrollable flex rows, a spacer item is not) */
+.prow .tabs::after{content:"";flex:0 0 14px}
+.prow .tabs button{
+  flex:0 0 auto;
+  height:62px;
+  padding:2px 2px 0;
+  font-size:clamp(16.5px,4.6vw,19px);
+}
+.prow>button[data-a="settings"]{
+  width:44px;height:44px;
+  justify-self:end;
+  border-radius:50%;
+  background:var(--bg);
+  position:relative;z-index:2;
+}
+.sbar>button{flex:none}
+@media (max-width:380px){
+  .prow{height:64px;column-gap:6px;padding:4px 8px 0 10px}
+  .prow .tabs{height:56px;gap:14px}
+  .prow .tabs button{height:56px;padding:2px 3px 0}
+}
+
+/* ── v6 — tabs visible at once + cache-proof header ──
+   The row fits inside the grid's middle column on a 360px phone, so no tab
+   is hidden behind a swipe. Tab type scales down with the viewport, the gear
+   column shrinks slightly on narrow screens, and text autosizing is disabled
+   so Android's large-font setting can't push the labels back under the gear. */
+html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.prow{
+  grid-template-columns:minmax(0,1fr) 40px;
+  column-gap:8px;
+  padding:6px 8px 0 14px;
+}
+.prow .tabs{gap:9px}
+.prow .tabs button{
+  font-size:clamp(13.5px,3.75vw,17px);
+  letter-spacing:-.1px;
+  padding:2px 1px 0;
+}
+.prow>button[data-a="settings"]{
+  width:40px;height:40px;
+}
+@media (max-width:380px){
+  .prow{height:64px;column-gap:6px;padding:4px 6px 0 12px}
+  .prow .tabs{height:56px;gap:8px}
+  .prow .tabs button{height:56px;padding:2px 1px 0;font-size:13.5px}
+  .prow>button[data-a="settings"]{width:38px;height:38px}
+}
+
+/* ── v7 — profile tabs: Likes · Boards · Collages, larger type ──
+   The "Pins" tab is gone, so the row has room for noticeably bigger labels.
+   All three fit without scrolling; the scroll fade is switched off because
+   the content no longer reaches the gear. */
+.prow .tabs{gap:14px;mask-image:none;-webkit-mask-image:none}
+.prow .tabs::after{content:"";flex:0 0 4px}
+.prow .tabs button{
+  font-size:clamp(18px,5.1vw,21px);
+  font-weight:700;
+  letter-spacing:-.2px;
+  padding:2px 1px 0;
+}
+@media (max-width:380px){
+  .prow .tabs{gap:12px}
+  .prow .tabs button{font-size:18px;padding:2px 1px 0}
+}
+
+/* ── v8 — swipe between profile tabs ──
+   Swipe left moves forward (Likes → Bookmarks → Explore), right goes back.
+   The pane slides in from the direction of travel so the gesture reads as a
+   page change rather than a redraw. */
+/* ── v19 — Explore tab ───────────────────────────────────────────────
+   A heading line above the mixed feed, and a small badge on every card
+   telling you which site the post came from.                          */
+.exhead{padding:12px 16px 6px}
+.exhead b{display:block;font-size:19px;font-weight:800;letter-spacing:-.2px}
+.exhead span{display:block;color:var(--mu);font-size:13px;margin-top:3px}
+.srcb{position:absolute;left:8px;bottom:8px;background:#000000b3;color:#fff;
+  border-radius:9px;padding:3px 8px;font-size:11px;font-weight:700;
+  line-height:1.2;letter-spacing:.2px;pointer-events:none;z-index:2}
+.tabpane{will-change:transform,opacity}
+.tabpane.sw-next{animation:swNext .2s cubic-bezier(.22,.7,.3,1)}
+.tabpane.sw-prev{animation:swPrev .2s cubic-bezier(.22,.7,.3,1)}
+@keyframes swNext{from{opacity:.25;transform:translateX(30px)}to{opacity:1;transform:none}}
+@keyframes swPrev{from{opacity:.25;transform:translateX(-30px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .tabpane.sw-next,.tabpane.sw-prev{animation:none}
+}
+
+/* ── v9 — swipe feel: the browser must not claim horizontal gestures ──
+   touch-action:pan-y lets vertical scrolling stay native while horizontal
+   drags belong to the app, so Android never cancels the touch sequence
+   mid-swipe. Scoped to the profile screen so the home feed keeps its
+   horizontally scrollable chip row. */
+.prof,.prof .tabs,.prof .chips,.tabpane{touch-action:pan-y}
+#app.sliding{will-change:transform,opacity}
+.tabpane{will-change:transform,opacity}
+
+/* ── v9 — swipe carousel track for the profile tabs ──
+   .tabwrap is the track; the current pane and the incoming pane sit side by
+   side while you drag, then snap into place. */
+.tabwrap{position:relative}
+.tabwrap.sliding{overflow:clip}
+.tabpane{will-change:transform}
+#app{--hdr:70px}
+/* the Boards search + filter row stays pinned under the profile header */
+.phead{position:sticky;top:var(--hdr);background:var(--bg);z-index:5;padding-top:2px}
+.phead .sbar{margin-top:12px}
+@media (max-width:380px){#app{--hdr:64px}}
+
+/* ── v9 — motion polish ──
+   Press feedback on tappable things, a shadow on the pane that is sliding,
+   and a one-off entrance that hints the profile row can be swiped. */
+button,.chip,.bc,.card{transition:transform .13s cubic-bezier(.2,.7,.3,1),opacity .13s ease}
+button:active,.chip:active,.bc:active{transform:scale(.96);opacity:.85}
+.prow .tabs button:active{transform:scale(.95)}
+.tabwrap.sliding .tabpane{box-shadow:none}
+.tabpane.peek{animation:peek .45s cubic-bezier(.2,.8,.3,1)}
+@keyframes peek{from{opacity:.25;transform:translateX(26px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .tabpane.peek{animation:none}
+  button,.chip,.bc,.card{transition:none}
+}
+
+/* ── v10 — the whole profile screen owns horizontal gestures ──
+   touch-action:pan-y on the profile subtree means the browser never claims a
+   horizontal drag (which is what cancelled the touch sequence on Android).
+   The home screen keeps its own horizontally scrollable chip row. */
+#app[data-screen="profile"]{touch-action:pan-y}
+#app[data-screen="profile"] .chips{overflow-x:visible}
+
+/* ── v13 — smooth swipe ──
+   The panes are composited on the GPU only while a swipe is in flight, the
+   track keeps a fixed height during the gesture so the page never reflows
+   under your finger, and the incoming pane is pre-built while the browser is
+   idle so a swipe never has to construct a page mid-gesture. */
+.tabwrap{position:relative}
+.tabwrap.sliding{overflow:clip}
+.tabwrap.dragging .tabpane{will-change:transform;transform:translateZ(0);backface-visibility:hidden}
+.tabpane{backface-visibility:hidden}
+.tabpane[hidden]{display:none}
+
+/* ── v14 · live booru feed ─────────────────────────────────────────────── */
+.art.live{position:relative;overflow:hidden;background:#141418}
+.art.live img{width:100%;height:100%;object-fit:cover;display:block;
+  animation:pbFade .28s ease both}
+@keyframes pbFade{from{opacity:0;transform:scale(1.015)}to{opacity:1;transform:none}}
+.loadmore{display:flex;justify-content:center;padding:18px 0 34px;color:var(--mu);font-size:13px}
+.loadmore .btn{margin:0}
+/* One spinning circle replaces every “Loading…/Load more” label. */
+.spin{width:22px;height:22px;border-radius:50%;border:2.5px solid var(--chip);border-top-color:var(--ac);animation:spin .8s linear infinite;display:block}
+.spin.idle{opacity:.55;animation-duration:1.7s}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinbtn{display:flex;align-items:center;justify-content:center;padding:8px;margin:0 auto;border-radius:50%}
+.empty .spin{margin:0 auto}
+.spinbtn:active{opacity:.7}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+@media (prefers-reduced-motion:reduce){.art.live img{animation:none}}
+
+.art.live.full{background:#0b0b0e}
+.art.live.full img{object-fit:contain;background:#0b0b0e}
+
+.sx{position:absolute;top:16px;right:14px;z-index:3;width:32px;height:32px;border-radius:16px;
+  display:flex;align-items:center;justify-content:center;color:var(--mu);background:var(--card);
+  border:1px solid var(--line)}
+.sx:active{transform:scale(.92)}
+
+.tabs button.addsrc{color:var(--mu);padding-left:2px}
+.tabs button.addsrc:active{transform:scale(.9)}
+
+/* v23 — smooth swipe fixes
+   · overflow-x:clip (not hidden) so the sticky search/filter row keeps working
+     while panes slide, instead of jumping to its un-stuck position.
+   · image fade-in animations restart whenever a hidden pane is shown, which
+     flickered every image on swipe — pane images no longer re-run them.
+   · panes stay composited while idle so the first frame of a swipe is cheap. */
+.tabpane img{animation:none!important}
+.tabwrap.sliding .tabpane{transition:none}
+
+
+/* v25 — less lag: off-screen tabs stay laid out (zero height, invisible) so a
+   swipe only has to move them, never build/layout them mid-gesture. */
+.tabpane[hidden]{display:block!important;position:absolute;left:0;top:0;width:100%;height:0;overflow:hidden;visibility:hidden;pointer-events:none}
+/* animated underline for Likes / Bookmarks / Explore */
+.prof .tabs{position:relative}
+.prof .tabs button.on{border-color:transparent!important}
+.prof .tabs button{transition:color .25s ease,opacity .25s ease,transform .13s cubic-bezier(.2,.7,.3,1)}
+.prof .tabs button:not(.on){opacity:.62}
+.tind{position:absolute;left:0;bottom:0;height:3px;width:0;border-radius:3px;background:var(--tx);
+  transition:transform .38s cubic-bezier(.22,.9,.3,1),width .38s cubic-bezier(.22,.9,.3,1);will-change:transform,width;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.tind{transition:none}}
+
+/* v26 — native scroll-snap pager (replaces the JS drag carousel) */
+.tabwrap{display:flex;align-items:flex-start;overflow-x:scroll;overflow-y:hidden;
+  scroll-snap-type:x mandatory;overscroll-behavior-x:contain;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch}
+.tabwrap::-webkit-scrollbar{display:none}
+.tabwrap .tabpane,.tabwrap .tabpane[hidden]{display:block!important;position:relative!important;visibility:visible!important;
+  flex:0 0 100%;width:100%;min-width:0;height:auto;overflow:visible;pointer-events:auto;
+  scroll-snap-align:start;scroll-snap-stop:always;transform:none!important;will-change:auto}
+.tabwrap .tabpane:not(.cur){height:var(--ch,auto);overflow:hidden}
+/* sticky can't live inside a horizontal scroller, so the header scrolls with the page */
+.tabwrap .phead{position:static}
+/* let the browser handle both axes on the profile screen */
+#app[data-screen="profile"],.prof,.prof .tabs,.prof .chips,.tabpane,.tabwrap{touch-action:pan-x pan-y!important}
+html,body{overscroll-behavior-x:none}
+/* v27: the whole screen below the tab row is swipeable, even when a tab is short or empty */
+.tabwrap{min-height:calc(100vh - 150px);min-height:calc(100svh - 150px)}
+
+/* v30 — neighbours show their own scroll position while dragging */
+.tabwrap .tabpane:not(.cur)>*{transform:translate3d(0,var(--dy,0px),0)}
+.tabwrap .tabpane.cur>*{transform:none}
+
+/* Likes: account total and one-tap chronological sort, on the same row. */
+.likes-head{display:flex;align-items:center;gap:10px;padding:10px 12px 12px 16px}
+.likes-head .exhead{flex:1;min-width:0;padding:0}
+.likes-head .exhead span{font-size:12px}
+.likes-sort{flex:none;gap:7px;padding:0 13px}
+.likes-sort svg{width:19px;height:19px}
+.likes-sort:active{transform:scale(.96)}
+.likes-sort:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+
+
+/* Post details: centered image above an always-visible bottom information/action dock. */
+.sheet.full.post-sheet{height:100vh;height:100dvh;max-height:100vh;max-height:100dvh;padding:0;overflow:hidden;background:var(--bg);overscroll-behavior:contain}
+.post-detail{display:grid;grid-template-rows:minmax(0,1fr) auto;width:100%;height:100%;min-height:0;padding:0;overflow:hidden}
+.post-visual{position:relative;width:100%;height:100%;min-height:0;overflow:hidden;background:var(--bg)}
+.post-topbar{position:absolute;z-index:2;inset:0 0 auto;display:flex;align-items:center;justify-content:space-between;
+  padding:calc(12px + env(safe-area-inset-top,0px)) 12px 28px;background:linear-gradient(#0008,transparent);pointer-events:none}
+.post-topbar button{width:42px;height:42px;border-radius:50%;background:#0007;color:#fff;pointer-events:auto;backdrop-filter:blur(8px)}
+.post-topbar button:active{background:#000b}
+.post-media{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:0;overflow:hidden}
+.post-image{display:block;flex:none;width:100%;height:auto;max-height:100%;object-fit:cover;object-position:center;border-radius:0}
+.post-media>.art{flex:none;width:100%;max-height:100%;border-radius:0;transition:none}
+.post-media>.art:active{transform:none}
+.post-bottom{position:relative;z-index:3;min-width:0;width:100%;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px));background:var(--bg)}
+.post-info{display:flex;align-items:center;gap:12px;margin:0 14px;padding:5px 0;border-bottom:1px solid var(--chip)}
+.post-info[hidden]{display:none}
+.post-info dl{flex:1;min-width:0;margin:0}
+.post-info-row{position:relative;display:block;min-width:0;padding:2px 0}
+/* Keep the category accessible to screen readers without a visible label. */
+.post-info-row dt{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.post-info-row dd{margin:0;font-size:14px;line-height:20px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.post-name-divider{color:var(--mu);font-weight:400}
+.post-actions{display:grid;grid-template-columns:repeat(var(--post-action-count,3),minmax(0,1fr));align-items:center;padding:3px 12px 1px;gap:6px}
+.post-action{justify-self:center;width:44px;height:44px;border-radius:50%;color:var(--tx);transition:background .15s,transform .15s}
+.post-action svg{width:24px;height:24px;pointer-events:none}
+.post-action:hover{background:var(--chip)}
+.post-action:active{transform:scale(.92)}
+.post-action.is-liked{color:#ff4d6d}
+.post-action:disabled{cursor:wait;opacity:.5}
+.post-action[aria-busy="true"] svg{animation:post-download-pulse .8s ease-in-out infinite alternate}
+@keyframes post-download-pulse{to{opacity:.25;transform:translateY(3px)}}
+.bookmark-heading{display:flex;align-items:center;gap:12px;margin:0 0 14px;padding-right:40px}
+.bookmark-heading button{width:38px;height:38px;flex:none}
+.bookmark-heading h2{flex:1;margin:0;text-align:left}
+.share-link-label{display:block;color:var(--mu);font-size:14px;margin:0 0 9px}
+@media (max-width:360px){.post-info{margin:0 12px}.post-actions{gap:4px}}
+
+
+/* The detail image opens a separate image-only page. */
+.post-media[data-a="viewimage"]{cursor:zoom-in}
+.post-media[data-a="viewimage"]:focus-visible{outline:2px solid var(--tx);outline-offset:-3px}
+body.viewing-image #nav,body.viewing-image #toast,body.viewing-image .pwa-bar,body.viewing-image .offline-bar{visibility:hidden!important;pointer-events:none!important}
+body.viewing-image #ov{background:#000}
+.sheet.full.image-viewer{display:flex;align-items:center;justify-content:center;width:100vw;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;padding:0;border-radius:0;overflow:hidden;background:#000;overscroll-behavior:contain}
+.fullscreen-image{display:block;width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;object-position:center;user-select:none;-webkit-user-drag:none}
+.image-viewer>.art{width:100%;height:100%;max-height:100%;aspect-ratio:auto!important;border-radius:0;transition:none}
+.image-viewer>.art:active{transform:none}
+.image-viewer:fullscreen{width:100vw;height:100vh;max-width:none;max-height:none;background:#000}
+.image-viewer:-webkit-full-screen{width:100vw;height:100vh;max-width:none;max-height:none;background:#000}
+
+/* More menu: grouped, distinctly highlighted Character / Artist / Series tags. */
+.post-tags-sheet{padding-top:12px}
+.post-tags-heading{position:sticky;top:-12px;z-index:2;display:flex;align-items:center;gap:10px;margin:0 -2px;padding:4px 0 14px;background:var(--sh)}
+.post-tags-heading>button{width:40px;height:40px;flex:none}
+.post-tags-heading h2{margin:0;text-align:left;font-size:20px;line-height:1.4}
+.post-tags-heading p{margin:2px 0 0;font-size:12px;color:var(--mu)}
+.post-tag-group{--tag-color:var(--tx);--tag-bg:var(--chip);--tag-border:var(--chip);padding:12px 0 16px}
+.post-tag-group+.post-tag-group{border-top:1px solid var(--chip)}
+.post-tag-group[data-category="character"]{--tag-color:#a4eac1;--tag-bg:#192e23;--tag-border:#31543f}
+.post-tag-group[data-category="artist"]{--tag-color:#ffb4bd;--tag-bg:#342027;--tag-border:#653540}
+.post-tag-group[data-category="series"]{--tag-color:#d0bdff;--tag-bg:#292238;--tag-border:#53416e}
+.post-tag-group h3{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:14px;color:var(--tag-color);font-weight:700}
+.post-tag-group h3 span{font-size:11px;font-weight:500;opacity:.7}
+.post-tag-list{display:flex;flex-wrap:wrap;gap:7px}
+.post-tag{display:inline-block;max-width:100%;padding:7px 10px;border:1px solid var(--tag-border);border-radius:9px;background:var(--tag-bg);color:var(--tag-color);font-size:13px;font-weight:500;line-height:1.35;overflow-wrap:anywhere;user-select:text}
+.post-tags-empty{padding:24px 0;color:var(--mu);text-align:center;font-size:14px}
+:root[data-theme="light"] .post-tag-group[data-category="character"]{--tag-color:#23633d;--tag-bg:#e9f6ed;--tag-border:#bfdcc8}
+:root[data-theme="light"] .post-tag-group[data-category="artist"]{--tag-color:#923446;--tag-bg:#fff0f2;--tag-border:#edc1ca}
+:root[data-theme="light"] .post-tag-group[data-category="series"]{--tag-color:#654299;--tag-bg:#f3edff;--tag-border:#d5c5ef}
+
+
+/* Pinch/drag affects only the full-screen image, never the browser viewport. */
+.sheet.full.image-viewer,.fullscreen-image,.image-viewer>.art{touch-action:none;-webkit-touch-callout:none}
+.fullscreen-image,.image-viewer>.art{transform-origin:50% 50%;will-change:transform}
+.image-viewer.is-zoomed{cursor:grab}
+.image-viewer.is-zoomed:active{cursor:grabbing}
+
+/* More panel: file information first, highlighted tags second. */
+.post-more-section{padding:12px 0 16px}
+.post-more-section+.post-more-section{border-top:1px solid var(--chip);padding-top:18px}
+.post-more-section>h3{margin:0 0 14px;font-size:15px;font-weight:700;color:var(--tx)}
+.post-file-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 12px;margin:0}
+.post-file-grid>div{min-width:0}
+.post-file-grid dt{margin:0 0 5px;font-size:12px;line-height:1.3;color:var(--mu)}
+.post-file-grid dd{margin:0;font-size:14px;font-weight:600;line-height:1.5;overflow-wrap:anywhere}
+.post-rating{display:inline-block;padding:2px 7px;border-radius:6px;background:var(--chip);font-size:12px;line-height:1.5}
+.post-rating[data-rating="g"],.post-rating[data-rating="s"]{color:#a4eac1;background:#192e23}
+.post-rating[data-rating="q"]{color:#f4d48d;background:#342b1c}
+.post-rating[data-rating="e"]{color:#ffb4bd;background:#342027}
+.post-all-tags-section .post-tag-group:first-child{padding-top:0}
+:root[data-theme="light"] .post-rating[data-rating="g"],:root[data-theme="light"] .post-rating[data-rating="s"]{color:#23633d;background:#e9f6ed}
+:root[data-theme="light"] .post-rating[data-rating="q"]{color:#7b581a;background:#fff5da}
+:root[data-theme="light"] .post-rating[data-rating="e"]{color:#923446;background:#fff0f2}
+
+
+/* Original platform beside the compact names, with an accessible 44px link. */
+.post-source-links{display:flex;align-items:center;flex:none;gap:2px;margin-left:auto}
+.post-source-link{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;border-radius:50%;color:var(--tx);text-decoration:none;transition:background .15s,transform .15s}
+.post-source-link svg{width:22px;height:22px;pointer-events:none}
+.post-source-link[data-platform="pixiv"]{color:#0096fa}
+.post-source-link:hover{background:var(--chip)}
+.post-source-link:active{transform:scale(.92)}
+.post-source-link:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+
+
+/* Vertical page gestures: up from details, down from the blank page. */
+.sheet.full.post-sheet,.sheet.full.post-blank-page{touch-action:manipulation}
+.post-sheet .post-image{-webkit-user-drag:none}
+body.viewing-blank #nav,body.viewing-blank #toast,body.viewing-blank .pwa-bar,body.viewing-blank .offline-bar{visibility:hidden!important;pointer-events:none!important}
+body.viewing-blank #ov{background:var(--bg)}
+.sheet.full.post-blank-page{width:100vw;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;padding:0;overflow:hidden;background:var(--bg);outline:none;overscroll-behavior:none}
+
+
+/* Related art: a section per name, five previews and a sixth Load more tile. */
+.sheet.full.post-blank-page{overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch}
+.related-page{width:min(100%,1040px);min-height:100%;margin:0 auto;padding:0 16px calc(28px + env(safe-area-inset-bottom,0px))}
+.related-header{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:8px;padding:calc(8px + env(safe-area-inset-top,0px)) 0 8px;background:var(--bg)}
+.related-header button{width:44px;height:44px;flex:none;border-radius:50%}
+.related-header h1{margin:0;font-size:20px;font-weight:700}
+.related-section{padding:10px 0 14px}
+.related-section+.related-section{border-top:1px solid var(--chip)}
+.related-section-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:34px;margin-bottom:9px}
+.related-section-heading h2{flex:1;min-width:0;margin:0;text-align:left;font-size:18px;line-height:24px;overflow-wrap:anywhere}
+.related-grid{display:grid;grid-auto-flow:column;grid-auto-columns:clamp(128px,35vw,196px);gap:8px;align-items:start;overflow-x:auto;overflow-y:hidden;padding:0 1px 6px;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.related-grid::-webkit-scrollbar{display:none}
+.related-grid:focus-visible{outline:2px solid var(--tx);outline-offset:3px;border-radius:12px}
+.related-grid:has(.related-empty){grid-auto-columns:100%}
+.related-card,.related-skeleton{display:block;position:relative;width:100%;aspect-ratio:4/5;min-width:0;overflow:hidden;border-radius:12px;background:var(--ph);scroll-snap-align:start}
+.related-card img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none;user-select:none}
+.related-card:active{opacity:.8}
+.related-card:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+.related-skeleton{animation:related-pulse 1.3s ease-in-out infinite alternate}
+@keyframes related-pulse{to{opacity:.45}}
+.related-empty{grid-column:1/-1;width:100%;margin:0;padding:22px 12px;color:var(--mu);font-size:14px;line-height:1.5;text-align:center}
+.related-more{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:5px;min-height:34px;padding:0 2px 0 8px;border:0;border-radius:99px;background:transparent;color:var(--ac);font-size:13px;font-weight:600;line-height:1.2;white-space:nowrap;cursor:pointer}
+.related-more svg{flex:none;transition:transform .18s ease}
+.related-more:active{opacity:.75}
+.related-more:active svg{transform:translateX(2px)}
+.related-more:disabled{cursor:default;opacity:.65}
+.related-more:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+@media (min-width:760px){.related-page{padding-left:24px;padding-right:24px}.related-grid{grid-auto-columns:clamp(160px,19vw,200px);gap:10px}.related-section{padding:12px 0 18px}}
+@media (prefers-reduced-motion:reduce){.related-skeleton{animation:none}.related-more svg{transition:none}}
+@media (prefers-reduced-motion:reduce){.related-skeleton{animation:none}}
+
+/* Full character / artist / series pages share the Likes feed UI. */
+body.viewing-tag-feed #app,body.viewing-tag-feed #nav{visibility:hidden}
+body.viewing-tag-feed #ov{background:#050408}
+.sheet.full.tag-feed-sheet{width:100vw;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;padding:0;overflow-x:hidden;overflow-y:auto;background:rgba(11,10,14,.54);color:#f3f0f5;--tx:#f3f0f5;--mu:#aaa3b2;--chip:rgba(255,255,255,.09);--ph:rgba(255,255,255,.06);border-radius:22px 22px 0 0;box-shadow:0 -8px 45px #0004;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.tag-feed-page{width:100%;max-width:430px;min-height:100%;margin:0 auto;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.tag-feed-header{padding-top:env(safe-area-inset-top,0px)}
+.tag-feed-sheet .tag-feed-header,.tag-feed-sheet .phead{background:rgba(11,10,14,.38);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid #ffffff0c}
+.tag-feed-sheet .phead{padding-top:0}
+/* Do not reuse .prow: its profile grid reserves a narrow gear column. */
+.tag-feed-topbar{display:flex;align-items:center;gap:8px;min-height:52px;padding:4px 16px 4px 10px}
+.tag-feed-header .tag-feed-back{width:44px;height:44px;flex:0 0 44px;border-radius:50%}
+.tag-feed-title{flex:1 1 0%;width:auto;min-width:0;margin:0;font-size:clamp(18px,5.1vw,21px);font-weight:700;letter-spacing:-.2px;line-height:1.25;white-space:normal;word-break:normal;overflow-wrap:break-word}
+.tag-feed-title>span{display:inline;padding:0;border:0}
+.tag-feed-page .phead{position:static}
+.tag-feed-page .likes-sort:disabled{opacity:.55;cursor:default}
+@media(max-width:380px){.tag-feed-title{font-size:18px}}
+
+/* Actual loading is animated; the idle/manual fallback is explicitly labeled. */
+.tag-feed-pagination{min-height:78px;padding:18px 12px 28px}
+.tag-feed-loading{display:flex;align-items:center;justify-content:center;gap:10px;min-height:44px;color:var(--mu);font-size:14px}
+.tag-feed-load{min-width:144px;justify-content:center}
+.tag-feed-end{padding:20px 16px 30px;color:var(--mu);font-size:13px;text-align:center}
+.post-file-grid time{font:inherit}
+
+/* Bookmarks: flat saved-post library, source/count dropdown and date order. */
+.bookmarks-summary{display:flex;align-items:center;gap:12px;padding:10px 12px 8px 16px}
+.bookmarks-filters{display:flex;align-items:center;gap:10px;padding:2px 12px 12px}
+.bookmarks-source{position:relative;flex:0 1 auto;max-width:46%;min-width:74px}
+.bookmarks-source.is-open{z-index:41}
+.bookmark-source-toggle{width:100%;height:44px;justify-content:space-between;gap:8px;padding:0 12px;font-size:15px}
+.bookmark-source-toggle>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bookmark-source-toggle>svg{flex:none;width:16px;height:16px}
+.bookmark-source-label{display:flex;align-items:center;gap:4px}
+.bookmark-source-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bookmark-selected-count{flex:none;font-variant-numeric:tabular-nums}
+.bookmark-sort{flex:none;min-width:114px;justify-content:center;gap:7px;padding:0 13px}
+.bookmark-sort svg{width:19px;height:19px}
+.bookmark-sort:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+.bookmark-source-menu{position:absolute;top:calc(100% + 8px);right:0;left:auto;width:min(300px,calc(100vw - 24px));max-height:min(320px,calc(100dvh - 210px));overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;background:var(--sh);border:1px solid var(--chip);border-radius:16px;padding:6px;box-shadow:0 12px 32px #0006;z-index:42}
+.bookmark-source-menu[hidden]{display:none}
+.bookmark-source-menu [role="option"]{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;text-align:left;padding:10px;border-radius:10px;font-size:15px}
+.bookmark-source-menu [role="option"]>span:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
+.bookmark-source-menu [role="option"][aria-selected="true"]{background:var(--chip);font-weight:700}
+.bookmark-source-menu [role="option"]:focus-visible{outline:2px solid var(--tx);outline-offset:-2px;background:var(--chip)}
+.bookmark-option-count{font-size:14px;color:var(--mu);font-variant-numeric:tabular-nums}
+.bookmark-option-check{width:15px;flex:none;font-size:14px}
+.bookmarks-count{flex:1;min-width:0;padding:0}
+.bookmarks-count>span{font-size:12px}
+.bookmark-unavailable{display:flex;flex-direction:column;gap:10px;width:100%;aspect-ratio:3/4;padding:16px;background:var(--ph);border-radius:12px;text-align:center}
+.bookmark-unavailable>small{color:var(--mu);font-size:12px}
+.bookmark-unavailable[aria-busy="true"]{opacity:.55}
+.bookmarks-empty{padding-top:48px}
+
+/* Second row: roomy local search plus a compact, right-anchored source filter. */
+.bookmark-search{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:44px;padding:0 10px 0 12px;border:1px solid var(--chip);border-radius:15px;background:var(--chip)}
+.bookmark-search:focus-within{border-color:var(--mu)}
+.bookmark-search>svg{width:20px;height:20px;flex:none;color:var(--mu)}
+.bookmark-search input{width:100%;min-width:0;flex:1;background:transparent;border:0;outline:0;padding:0;margin:0;color:var(--tx);font:inherit;font-size:16px}
+.bookmark-search input::placeholder{color:var(--mu);opacity:1}
+.bookmark-search input::-webkit-search-cancel-button{-webkit-appearance:none}
+.bookmark-search-clear{display:flex;align-items:center;justify-content:center;flex:none;width:26px;height:28px;color:var(--mu);border-radius:8px}
+.bookmark-search-clear[hidden]{display:none}
+
+/* Gesture and crossfade layers for posts and Related art. */
+.sheet-ghost{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;overflow:hidden;pointer-events:none}
+.sheet-ghost>.sheet{flex:none;box-shadow:0 0 40px #0006}
+.sheet.post-sheet{will-change:transform}.sheet.post-blank-page{will-change:opacity}
+/* The real post stays painted under the Related art surface during the fade. */
+#ov>.glint-related-post-underlay{position:absolute!important;inset:0!important;z-index:1;pointer-events:none!important;will-change:opacity}
+.sheet-next{position:absolute!important;left:0;bottom:0;overflow:hidden!important;pointer-events:none;will-change:opacity}
+.shrink-float{position:fixed;z-index:61;overflow:hidden;pointer-events:none;transform-origin:0 0;will-change:transform}
+.shrink-float>img,.shrink-float>.art{display:block;width:100%;height:100%;object-fit:cover}
+.feedwrap,#sres{touch-action:pan-y}
+#app{overflow-x:clip}
+.src-ghost{position:fixed;left:0;right:0;z-index:20;overflow:hidden;pointer-events:none}
+.feedwrap,#sres{will-change:auto}
+.srctabs{position:relative}
+.srctabs button.on{border-color:transparent!important}
+.srctabs button{transition:opacity .25s ease}
+.srctabs button:not(.on):not(.addsrc){opacity:.62}
+.srctabs .tind{bottom:auto;top:0}
+
+/* Search: no fixed tag shortcut row. Source-aware suggestions live at the caret. */
+.search-head .sbar{margin:20px 10px 16px}
+.search-tag-field{position:relative}
+.search-tag-field>svg{flex:none}
+.search-tag-options{position:absolute;top:calc(100% + 8px);left:10px;right:10px;max-height:min(340px,45dvh);overflow-y:auto;overscroll-behavior:contain;background:var(--sh);border:1px solid var(--chip);border-radius:16px;padding:6px;box-shadow:0 12px 32px #0006;z-index:45}
+.search-tag-options[hidden]{display:none}
+.search-tag-options [role="option"]{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:10px;border-radius:10px;text-align:left;font-size:15px}
+.search-tag-options [role="option"]>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.search-tag-options [role="option"]>small{flex:none;color:var(--mu);font-variant-numeric:tabular-nums;font-size:12px}
+.search-tag-options [role="option"][aria-selected="true"],.search-tag-options [role="option"]:hover{background:var(--chip)}
+.search-hint{line-height:1.7}
+.search-hint small{font-size:13px;color:var(--mu)}
+.search-pagination{display:flex;justify-content:center;align-items:center;min-height:100px;padding:24px 12px 30px}
+.search-error .chip{margin-top:16px}
+
+.search-pagination .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Search totals replace source tabs; the source is inherited from Home. */
+.search-summary{display:flex;align-items:center;gap:12px;padding:0 12px 14px 16px}
+.search-count{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.search-count>b{font-size:20px;line-height:1.25;overflow-wrap:anywhere}
+.search-source{font-size:12px;line-height:1.4;color:var(--mu)}
+.search-sort{flex:none;min-width:122px;max-width:48%;height:44px;justify-content:center;gap:7px;padding:0 13px;font-size:16px}
+.search-sort svg{flex:none;width:19px;height:19px}
+.search-sort:disabled{opacity:.5;cursor:default}
+.search-sort:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+
+/* Empty Search becomes a local, per-source recent-query list. */
+.search-submit{flex:none;width:26px;min-height:40px;border-radius:10px}
+.search-submit:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+.search-recents{padding:8px 16px 16px}
+.recent-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;margin-bottom:4px}
+.recent-heading h2{margin:0;font-size:18px;line-height:1.3;font-weight:700;letter-spacing:-.15px}
+.recent-heading h2:focus{outline:none}
+.recent-clear{flex:none;min-height:44px;min-width:44px;padding:0 1px 0 10px;font-size:14px;color:var(--mu);border-radius:10px}
+.recent-list{margin:0;padding:0;list-style:none}
+.recent-list>li{display:flex;align-items:stretch;min-width:0;gap:2px;border-bottom:1px solid color-mix(in srgb,var(--mu) 16%,transparent)}
+.recent-run{flex:1;min-width:0;gap:13px;justify-content:flex-start;text-align:left;min-height:56px;padding:10px 0;border-radius:10px}
+.recent-run>svg{flex:none;color:var(--mu)}
+.recent-run>span{min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;font-size:16px;line-height:1.45}
+.recent-remove{flex:none;width:44px;min-height:48px;align-self:center;color:var(--mu);border-radius:12px}
+.recent-run:focus-visible,.recent-remove:focus-visible,.recent-clear:focus-visible{outline:2px solid var(--tx);outline-offset:-2px}
+.recent-remove:hover,.recent-clear:hover{background:var(--nav);color:var(--tx)}
+.recent-empty{color:var(--mu);font-size:14px;line-height:1.65;padding:13px 0}
+.recent-empty p{margin:0 0 10px}
+.recent-empty .recent-help{font-size:13px;margin-top:24px;opacity:1}
+
+/* v64: local bookmarks / confirmed source favourites are separate actions. */
+.post-like-feedback{font-size:12px;line-height:1.45;color:var(--mu);padding:7px 18px 10px;overflow-wrap:anywhere;max-height:135px;overflow:auto}
+.post-like-feedback[hidden]{display:none}.post-like-feedback>div{display:flex;gap:18px;flex-wrap:wrap;margin-top:7px}
+.post-like-feedback button{color:var(--tx);text-decoration:underline;min-height:30px;text-underline-offset:3px}
+.source-like:disabled:not([aria-busy="true"]){cursor:not-allowed}
+/* v65.12: a heart waiting on the account state stays tappable — it shows the
+   wait without ever looking broken or dead. */
+.source-like.is-waiting{opacity:.55}
+.source-like{transition:opacity .18s ease,transform .18s ease}
+.source-like:active{transform:scale(.9)}
+.source-catalogue,.source-support,.source-account-form,.source-account-list{padding-top:6px;min-width:0}
+.source-intro,.source-security,.source-research{font-size:13px;line-height:1.55;color:var(--mu);margin:8px 0 18px;overflow-wrap:anywhere}
+.source-security{font-size:12px;margin-top:18px;border-top:1px solid var(--chip);padding-top:13px}
+.source-intro b,.source-research b{color:var(--tx)}
+.source-group-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--mu);margin:24px 0 10px}
+.source-card{border:1px solid var(--chip);border-radius:16px;margin:0 0 11px;overflow:hidden}
+.source-card-info{width:100%;display:flex;align-items:flex-start;flex-direction:column;text-align:left;padding:14px 14px 11px;gap:5px}
+.source-card-info>b{font-size:16px}.source-card-info small{font-size:12px;color:var(--mu);line-height:1.5;overflow-wrap:anywhere}
+.source-badges{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 4px;line-height:1.4}
+.source-badges>span{display:inline-block;border-radius:7px;padding:4px 7px;background:var(--chip);color:var(--tx);font-size:10px;font-weight:500}
+.source-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;border-top:1px solid var(--chip);padding:5px 9px;flex-wrap:wrap}
+.source-card-actions button{min-height:38px;padding:7px 9px;font-size:12px;border-radius:9px}.source-card-actions button:hover{background:var(--chip)}
+.source-card-actions .source-add{background:var(--ac);color:#fff;padding-inline:18px}.source-unavailable .source-card-info{opacity:.7}
+.source-back{display:block;font-size:13px;color:var(--mu);min-height:42px;margin:0 0 7px;padding-right:40px;text-align:left}
+.source-features{margin:18px 0}.source-features>div{display:grid;grid-template-columns:minmax(92px,.8fr) minmax(0,1.4fr);gap:14px;border-bottom:1px solid var(--chip);padding:10px 0;font-size:13px;line-height:1.5}
+.source-features dt{color:var(--mu)}.source-features dd{margin:0;overflow-wrap:anywhere}
+.source-support h3{font-size:15px;margin:22px 0 10px}.source-support li{font-size:13px;line-height:1.6;padding-left:3px;margin-bottom:9px;color:var(--mu)}
+.source-support ol,.source-support ul{padding-left:21px}.source-doc-links{display:flex;gap:10px 18px;flex-wrap:wrap;margin:15px 0;font-size:12px;line-height:1.5}
+.source-doc-links a{color:var(--tx);text-underline-offset:3px;overflow-wrap:anywhere}
+.source-account-form label{display:block;font-size:12px;font-weight:500;color:var(--mu);margin:15px 0 7px}
+.source-account-form .field{width:100%;max-width:100%;min-width:0;margin-bottom:4px}
+.source-field-hint,.source-advanced p,.source-account-status{font-size:12px;line-height:1.55;color:var(--mu);margin:8px 0 14px;overflow-wrap:anywhere}
+.source-advanced{border:1px solid var(--chip);border-radius:12px;padding:10px 12px;margin:14px 0;font-size:13px}
+.source-advanced summary{cursor:pointer;line-height:1.5;min-height:23px}.source-text-button{font-size:12px;min-height:36px;text-decoration:underline;text-underline-offset:3px;text-align:left}
+.auth-check-result{font-size:12px;line-height:1.55;overflow-wrap:anywhere;margin:6px 0;color:var(--mu)}
+.source-account-form .btn{margin-top:10px}.source-account-form .btn:disabled{opacity:.55;cursor:wait}
+.source-account-row{display:flex;justify-content:space-between;gap:16px;width:100%;min-height:72px;text-align:left;padding:12px 0;border-bottom:1px solid var(--chip)}
+.source-account-row>span:first-child{display:flex;flex-direction:column;gap:5px;min-width:0}.source-account-row small{font-size:12px;line-height:1.5;color:var(--mu)}.source-account-row>span:last-child{font-size:12px;flex:none;color:var(--mu)}
+
+/* v65: accessible, interruptible transitions and failure states. */
+body.dialog-open{overflow:hidden;overscroll-behavior:none}
+.ov{overscroll-behavior:contain}
+.sheet{overscroll-behavior:contain;scrollbar-gutter:stable;max-height:92dvh}
+.sheet:focus{outline:none}
+[role="button"][tabindex]:focus-visible,[role="switch"]:focus-visible,.field:focus-visible{outline:2px solid var(--tx);outline-offset:3px;border-radius:12px}
+[data-a="open"][role="button"]{cursor:pointer;border-radius:12px}
+.hdh button,.sx,.post-tags-heading>button,.related-header>button,.source-back,.recent-remove,.recent-clear{min-height:44px;min-width:44px}
+.sx{top:10px;right:8px;background:transparent;border:0}
+.feed-error{text-align:center;padding:20px 18px;color:var(--mu);font-size:14px;line-height:1.55}
+.feed-error .btn{max-width:240px}
+.image-unavailable{min-height:80px;display:flex;align-items:center;justify-content:center}
+.image-unavailable::after{content:"Image unavailable";position:absolute;padding:12px;color:var(--mu);font-size:12px;text-align:center}
+.image-failed{visibility:hidden}
+.storage-notice{position:fixed;z-index:110;left:12px;right:12px;bottom:calc(95px + env(safe-area-inset-bottom,0px));max-width:430px;margin:auto;padding:14px 16px;border:1px solid var(--mu);border-radius:16px;background:var(--sh);box-shadow:0 8px 32px #0005;font-size:13px;line-height:1.5}
+.storage-notice[hidden],.startup-error[hidden]{display:none}
+.storage-notice p{margin:0 0 8px}.storage-notice>div{display:flex;gap:12px;flex-wrap:wrap}.storage-notice button{min-height:36px;text-decoration:underline;text-underline-offset:3px}
+.startup-error{position:fixed;z-index:120;inset:15% 16px auto;margin:auto;max-width:420px;background:var(--sh);padding:28px;border-radius:20px;border:1px solid var(--mu);line-height:1.6}
+.startup-error h1{font-size:22px}.startup-error button{min-height:44px;padding:10px 20px;background:var(--ac);color:#fff;border-radius:22px}
+.toast{max-width:calc(100vw - 32px);white-space:normal;text-align:center;overflow-wrap:anywhere}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  .sheet,.src-ghost,.sheet-ghost,.sheet-next{will-change:auto}
+}
+.brand{margin:0}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.prow>button{min-width:44px;min-height:44px}
+.sheet.full{scrollbar-gutter:auto}
+.media-failure{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;pointer-events:none;padding:32px;color:var(--mu);text-align:center;font-size:14px}
+.media-failure button{pointer-events:auto;background:var(--chip);border-radius:22px;min-height:44px;padding:10px 20px;color:var(--tx)}
+/* Pagination should not restart a fade on every already-loaded image. */
+.feedwrap .art.live img,#sres .art.live img{animation:none}
+:root[data-theme="light"]{--mu:#666}
+.source-unavailable .source-card-info{opacity:1}
+/* Settings rows wrap instead of clipping their controls. */
+.li{flex-wrap:wrap;row-gap:8px}
+.li>b{min-width:0}
+.li-value{color:var(--mu);font-size:14px;text-align:right;margin-left:auto;overflow-wrap:anywhere}
+.li-choices{display:flex;gap:8px;flex:none;margin-left:auto}
+.li-stack{flex-direction:column;align-items:stretch}
+.li-stack>b{margin-bottom:2px}
+.li-choices-wide{margin-left:0}
+.li-choices-wide .chip{flex:1;justify-content:center;min-width:0;font-size:15px;height:44px;padding:0 10px}
+.settings-diagnostics{margin-top:22px}
+.settings-diagnostics .li{min-height:44px}
+/* The add-source control stays reachable while the source row scrolls. */
+.srctabs{scroll-padding-right:28px;gap:24px}
+.srctabs button{font-size:18px}
+.srctabs .addsrc{color:var(--mu);min-width:44px;justify-content:center}
+@media (max-width:360px){.srctabs{gap:16px}.srctabs button{font-size:17px}}
+
+/* v65.1 — Newest / Popular order on feeds other than Likes & Bookmarks. */
+.feed-sort{flex:none;height:40px;gap:7px;padding:0 14px;font-size:15px;font-weight:600;background:var(--chip);border-radius:14px}
+.feed-sort svg{flex:none;width:18px;height:18px}
+.feed-sort[aria-pressed="true"]{background:var(--tx);color:var(--bg)}
+.feed-sort:disabled{opacity:.45;cursor:default}
+.feed-sort:focus-visible{outline:2px solid var(--tx);outline-offset:3px}
+.exhead-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 16px 6px}
+.exhead-row>div{min-width:0}
+.exhead-row .feed-sort{height:38px;margin-top:2px}
+.feed-note{margin:0;padding:2px 16px 10px;font-size:12px;line-height:1.5;color:var(--mu)}
+@media (max-width:360px){.feed-sort{font-size:14px;padding:0 11px}}
+
+/* v65.2 — tappable post tags and the related-art order control.
+   Tags behave as entry points: the post-info names and the tag chips open
+   that tag's own feed, which carries the same Newest / Popular control. */
+.post-info-row dd{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;white-space:normal;overflow:visible;text-overflow:clip}
+.post-tag-inline{display:inline-flex;align-items:center;min-height:32px;max-width:100%;padding:4px 9px;border:1px solid var(--chip);border-radius:9px;background:var(--chip);color:var(--tx);font-size:14px;line-height:18px;font-weight:500;overflow-wrap:anywhere;text-align:left}
+.post-tag-inline:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+.post-tag-inline:active{opacity:.75}
+.post-tags-heading{padding-right:4px}
+button.post-tag{font-family:inherit;cursor:pointer;text-align:left}
+button.post-tag:hover,button.post-tag:active{filter:brightness(1.18)}
+button.post-tag:focus-visible{outline:2px solid var(--tag-color);outline-offset:2px}
+.related-header .related-sort{width:auto;height:34px;min-width:0;flex:none;margin-left:auto;padding:0 12px;border-radius:12px;background:var(--chip);color:var(--tx);font-size:14px;font-weight:600;gap:7px}
+.related-header .related-sort[aria-pressed="true"]{background:var(--tx);color:var(--bg)}
+.related-header .related-sort:disabled{opacity:.5;cursor:default}
+.related-header .related-sort:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+.related-header h1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:360px){.related-header .related-sort{padding:0 9px;font-size:13px;gap:5px}.related-header h1{font-size:18px}}
+
+/* Compact post info: tags stay on the single metadata line, so the tap target
+   grows with a transparent overlay instead of extra layout height. */
+.post-info-row dd{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.post-tag-inline{position:relative;display:inline;min-height:0;max-width:none;padding:0;border:0;border-radius:0;background:none;color:inherit;font:inherit;text-decoration:underline;text-decoration-style:dotted;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--mu);overflow-wrap:normal;text-align:left}
+.post-tag-inline::after{content:"";position:absolute;inset:-11px -6px;border-radius:8px}
+.post-tag-inline:hover,.post-tag-inline:active{text-decoration-color:currentColor;color:var(--tx)}
+.post-tag-inline:focus-visible{outline:2px solid var(--tx);outline-offset:3px;border-radius:4px}
+.tag-feed-pagination,.tag-feed-page .likes-head{gap:8px}
+
+/* The tag feed keeps its count row to one line so the first preview stays high. */
+.tag-feed-page .likes-head{align-items:center}
+.tag-feed-page .likes-head .exhead span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tag-feed-page .likes-head .chip{flex:none}
+.tag-feed-page .likes-head .exhead b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.post-tag-inline{text-underline-offset:1px}
+.tag-feed-page .likes-head 
+/* v65.4 — Explore mirrors each site's own explore views for the source
+   selected on Home: section headings, a period switch and a swipeable strip. */
+.ex-srcs{padding:0 16px 12px;gap:24px}
+.ex-sections{padding-bottom:8px}
+.ex-section{padding:4px 0 10px}
+.ex-section+.ex-section{border-top:1px solid var(--chip)}
+.ex-head{display:flex;align-items:center;gap:10px;padding:12px 16px 6px}
+.ex-head>div{flex:1;min-width:0}
+.ex-head h2{margin:0;font-size:19px;font-weight:800;letter-spacing:-.2px}
+.ex-note{margin:4px 0 0;font-size:12px;line-height:1.45;color:var(--mu)}
+.ex-more{flex:none;font-size:14px;font-weight:600;color:var(--mu);min-height:44px;padding:0 6px}
+.ex-more:active,.ex-more:hover{color:var(--tx)}
+.ex-busy{flex:none;display:inline-flex;color:var(--mu)}
+.ex-scales{display:flex;gap:8px;padding:0 16px 8px;overflow-x:auto;scrollbar-width:none}
+.ex-scales::-webkit-scrollbar{display:none}
+.ex-scale{height:34px;padding:0 14px;font-size:14px;font-weight:600;background:var(--chip);border-radius:12px}
+.ex-scale.on{background:var(--tx);color:var(--bg)}
+.ex-strip{display:flex;gap:6px;padding:0 16px 4px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.ex-strip::-webkit-scrollbar{display:none}
+.ex-cell{flex:none;width:132px;scroll-snap-align:start}
+.ex-cell .art{border-radius:10px}
+.ex-skel-row{display:flex;gap:6px;padding:0 16px 4px;overflow:hidden}
+.ex-skel-row span{flex:none;width:132px;height:186px;border-radius:10px;background:var(--ph);animation:exPulse 1.4s ease-in-out infinite}
+@keyframes exPulse{0%,100%{opacity:.55}50%{opacity:.95}}
+.ex-tagrow{display:flex;flex-wrap:wrap;gap:8px;padding:2px 16px 6px}
+.ex-tag{height:36px;padding:0 14px;font-size:14px;font-weight:500;background:var(--chip)}
+.ex-none{margin:0;padding:6px 16px 10px;font-size:13.5px;line-height:1.5;color:var(--mu)}
+.ex-error{margin:0 16px;padding:12px;border-radius:12px;background:var(--chip);font-size:13.5px;line-height:1.5}
+.ex-error p{margin:0 0 10px}
+.ex-feed-head{display:flex;align-items:center;gap:10px;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 10px 8px}
+.ex-feed-head>button{width:44px;height:44px;flex:none;border-radius:50%}
+.ex-feed-head h1{margin:0;font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ex-feed-head span{display:block;margin-top:2px;font-size:12.5px;color:var(--mu)}
+.ex-feed-page .grid{padding-top:4px}
+@media (max-width:360px){.ex-cell,.ex-skel-row span{width:118px}.ex-head h2,.ex-feed-head h1{font-size:18px}}
+
+/* v65.5 — Explore: bigger, equal thumbnails; a single explore view becomes the
+   feed itself (two per row, growing on scroll); videos carry a play mark. */
+.ex-strip{gap:10px}
+.ex-cell{width:min(46vw,220px)}
+.ex-cell .art{border-radius:14px;aspect-ratio:1/1!important}
+.ex-cell .art img{width:100%;height:100%;object-fit:cover;display:block}
+.ex-cell .art.full,.ex-cell .art.live.full{aspect-ratio:1/1!important}
+.ex-grid{padding:4px 16px 0}
+.ex-skel-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 6px}
+.ex-skel-grid span{height:min(58vw,300px);border-radius:14px;background:var(--ph);animation:exPulse 1.4s ease-in-out infinite}
+.ex-tail{display:flex;align-items:center;justify-content:center;min-height:40px;padding:12px 16px 18px;color:var(--mu);font-size:13px}
+.ex-hint{opacity:.75}
+/* v65.14 — the play mark must paint ABOVE the picture. Feed images are
+   animated (pbFade) and get promoted while they load, which lifted them over
+   the badge: on first load of an Explore feed page the mark was simply gone. */
+.vidb{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:inline-flex;pointer-events:none;z-index:2;filter:drop-shadow(0 2px 8px rgba(0,0,0,.5))}
+.art.live img{position:relative;z-index:0}
+.art .vidb,.art .srcb,.art .hrt{z-index:2}
+.vidb svg{position:static;width:22px;height:22px}
+.ex-cell .vidb svg,.ex-grid .vidb svg{width:30px;height:30px}
+/* Small, non-interactive state marks sit over the image, not its tap target. */
+.glint-card-status{position:absolute;right:5px;bottom:5px;z-index:4;display:flex;align-items:center;gap:3px;pointer-events:none}
+.glint-status-icon{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:rgba(8,7,10,.82);box-shadow:0 0 3px #00000073}
+.glint-status-like{color:#ff869b}.glint-status-bookmark{color:#ffd36b}
+.glint-card-status .glint-status-icon svg{position:static;inset:auto;display:block;width:10px;height:10px;flex:none}
+/* v65.15 — Settings ▸ Sources rows keep the whole row as the pick target and
+   add a small pencil (edit) and bin (delete/remove) beside it. */
+.glint-rows li.glint-source-choice{gap:2px}
+.glint-rows li>button.glint-source-edit:not(.glint-radio),.glint-rows li>button.glint-source-delete:not(.glint-radio){flex:none;width:40px;min-width:40px;min-height:40px;padding:0;border-radius:50%;background:transparent;color:var(--mu);justify-content:center}
+.glint-rows li>button.glint-source-edit:not(.glint-radio) svg,.glint-rows li>button.glint-source-delete:not(.glint-radio) svg{width:19px;height:19px;flex:none}
+.glint-rows li>button.glint-source-edit:not(.glint-radio):hover,.glint-rows li>button.glint-source-delete:not(.glint-radio):hover{background:var(--chip);color:var(--tx)}
+.glint-rows li>button.glint-source-delete:not(.glint-radio):hover{color:#ff5d73}
+.glint-rows li>button.glint-source-edit:not(.glint-radio):focus-visible,.glint-rows li>button.glint-source-delete:not(.glint-radio):focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+@media (max-width:360px){.ex-cell{width:min(48vw,200px)}}
+
+/* v65.6 — video posts play where the picture would be, and in the viewer. */
+.post-media.is-video{cursor:default}
+.post-video{display:block;width:auto;height:auto;max-width:100%;max-height:100%;margin:auto;background:#000;border-radius:inherit;object-fit:contain}
+.post-video:focus-visible{outline:2px solid var(--tx);outline-offset:2px}
+.fullscreen-video{width:100%;height:100%;max-height:100dvh;object-fit:contain;background:#000}
+.image-viewer .media-failure{z-index:3}
+.video-failed{opacity:.65}
+
+/* v65.8 — adding your own source from the catalogue sheet. */
+.custom-source-form{padding-bottom:8px}
+.custom-source-form label{display:block;margin:14px 0 6px;font-size:13px;font-weight:600;color:var(--mu)}
+.custom-source-form .field{width:100%}
+.custom-source-form .btn{margin-top:10px;width:100%}
+.custom-source-form .auth-check-result{margin:12px 0 0}
+.custom-source-form .auth-check-result[data-kind="ok"]{color:var(--tx)}
+.source-delete{color:#e2646a}
+.exhead-row span{text-transform:none}
+
+/* v65.9 — Explore opens straight on its source: no "Explore" label, no
+   repeated line under it, and no dead space above the first section. */
+.ex-phead{padding-top:0}
+.ex-phead .exhead-row{padding:2px 16px 0}
+.ex-phead .exhead b{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--mu)}
+.ex-phead+.ex-sections .ex-section:first-child{padding-top:0}
+.ex-phead+.ex-sections .ex-section:first-child .ex-head{padding:4px 16px 4px}
+.ex-sections .ex-scale{padding:0 13px}
+.ex-scale:first-child{margin-left:0}
+.hdh .brand{margin-right:auto}
+.ex-head .ex-more{min-height:32px;padding:0 2px}
+
+/* v65.11 — image quality choices in Settings. */
+.li-hint{display:block;margin-top:6px;font-size:12px;line-height:1.4;color:var(--mu)}
+.li-choices-wide .chip{padding:0 12px;font-size:13px}
+
+/* v65.15 — offline polish: the notice is subtle, the app underneath is fully
+   usable, and a cached picture that is missing fades in instead of popping. */
+.offline-bar{max-width:calc(100vw - 24px);overflow:hidden;text-overflow:ellipsis;opacity:.94}
+.offline-bar[hidden]{display:none}
+
+/* v65.16 — smooth scrolling on long feeds.
+   Cards far below the fold are not laid out or painted until they are needed,
+   while the intrinsic size keeps the scrollbar and the masonry columns stable.
+   `contain` stops a card's own reflow from reaching the whole feed. */
+.feedwrap .grid .col>div,
+#sres .grid .col>div,
+.ex-grid .grid .col>div{
+  content-visibility:auto;
+  contain-intrinsic-size:auto 240px;
+  contain:layout style paint;
+}
+.grid .art{contain:content}
+/* No permanent will-change on cards: one GPU layer per picture costs more
+   memory than it saves. The press feedback is a cheap transform anyway. */
+
+/* v65.20 — Google Drive sync block in Settings. Sits inside the same list as
+   the other rows: a status line that changes colour, a client-id field that
+   stays legible on both themes, and the destructive action set apart. */
+.drive-block{display:flex;flex-direction:column;gap:10px;min-width:0}
+.drive-block>*{min-width:0}
+/* Three actions never squeeze sideways: two per row, full width, wrapping. */
+.drive-block .li-choices{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;flex-wrap:nowrap}
+.drive-block .li-choices .chip{width:100%;justify-content:center;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drive-client{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;width:100%;min-width:0}
+.drive-client>span{grid-column:1/-1;font-size:13px;opacity:.72}
+.drive-client input{min-width:0;width:100%;padding:9px 11px;border-radius:10px;border:1px solid var(--line,rgba(255,255,255,.16));background:var(--field,rgba(255,255,255,.06));color:inherit;font:inherit;font-size:13px}
+.drive-client input:focus-visible{outline:2px solid var(--accent,#8ab4f8);outline-offset:1px}
+[data-drive-status]{line-height:1.45;overflow-wrap:anywhere}
+[data-drive-status][data-tone="ok"]{color:#5cc98a}
+[data-drive-status][data-tone="busy"]{opacity:.8}
+[data-drive-status][data-tone="error"]{color:#f08a8a}
+.drive-off{align-self:flex-start;opacity:.85}
+
+/* A video without any source-provided still gets a clean play tile, not a broken-image label. */
+.art.live.video-no-poster{background:radial-gradient(circle at 50% 42%,#292630 0%,#17161b 66%,#111014 100%)!important}
+
+/* Search tab: the current query as removable tag chips (v73.1). The row mirrors
+   the input, so it stays short and scrolls instead of pushing results away. */
+.search-tag-chips{max-height:74px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;margin:9px 0 0;padding-bottom:2px}
+.search-tag-chips::-webkit-scrollbar{width:0;height:0}
+.search-tag-chips .search-chip-clear{border-style:dashed;color:var(--mu)}
+
+/* Text waits for Enter: an accent ring marks a query that is not applied yet. */
+.search.glint-search-pending{border-color:var(--ac)}
+.bookmark-search.glint-search-pending{border-color:var(--ac)}
+.glint-search-pending>.search-submit,.glint-search-pending>svg{color:var(--ac)}

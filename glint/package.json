@@ -1,0 +1,28 @@
+{
+  "name": "glint-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Glint design with the Pinboard v65 engine, proxy and PWA.",
+  "scripts": {
+    "start": "node dev-server.mjs",
+    "dev": "node dev-server.mjs",
+    "build:pages": "node tools/build-pages.mjs",
+    "pages:dev": "npm run build:pages && wrangler pages dev dist",
+    "pages:deploy": "npm run build:pages && wrangler pages deploy dist --project-name=aiastin",
+    "test": "npm run test:unit && npm run test:python",
+    "test:unit": "node tests/run-unit.cjs",
+    "test:python": "python3 tests/production.test.py && python3 tests/proxy-private.test.py",
+    "test:browser": "node tests/explore-browser-check.cjs && node tests/explore.browser.cjs && node tests/accessibility.browser.cjs && node tests/card-status.browser.cjs && node tests/source-row-actions.browser.cjs && node tests/sheet-drag.browser.cjs && node tests/search-chips.browser.cjs && node tests/search-on-enter.browser.cjs && node tests/related-transition.browser.cjs && node tests/related-tagfeed-swipe.browser.cjs && node tests/post-close-thumbnail.browser.cjs && node tests/smoothness.browser.cjs && node tests/video.browser.cjs && node tests/drive-sync.browser.cjs && node tests/tag-pagination.browser.cjs && node tests/library-store.browser.cjs",
+    "test:proxy": "node tests/proxy-sources.live.cjs",
+    "test:contract": "node tests/production-proxy.test.cjs && node tests/proxy-private.test.cjs",
+    "check:sources": "node tools/check-sources.mjs"
+  },
+  "devDependencies": {
+    "axe-core": "^4.14.0",
+    "playwright": "^1.64.1",
+    "wrangler": "4.153.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

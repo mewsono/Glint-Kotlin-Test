@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+const ctx=vm.createContext({window:{},localStorage:{getItem:()=>null},sessionStorage:{getItem:()=>null},URL,URLSearchParams});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../sources.js'),'utf8'),ctx);
+const get=(p,src='danbooru')=>JSON.parse(vm.runInContext(`JSON.stringify(pbPostMetadata(${JSON.stringify(p)},${JSON.stringify(src)}))`,ctx));
+let info=get({meta:{tag_string_character:'hatsune_miku kagamine_rin',tag_string_copyright:'vocaloid',tag_string_artist:'sakimichan',author:'uploader_not_artist'}});
+assert.deepEqual(info.characters,['hatsune_miku','kagamine_rin']);assert.deepEqual(info.series,['vocaloid']);assert.deepEqual(info.artists,['sakimichan']);assert.equal(info.detailsReady,true);
+info=get({meta:{tags:{character:['character_one'],copyright:['series_one'],artist:['artist_one'],general:['1girl']}}},'e621');
+assert.deepEqual(info.characters,['character_one']);assert.deepEqual(info.artists,['artist_one']);
+info=get({meta:{tags:'char_one series_one artist_one general_tag',_tagTypes:{char_one:'character',series_one:'copyright',artist_one:'artist',general_tag:'general'},author:'not_the_artist'}},'yandere');
+assert.deepEqual(info.characters,['char_one']);assert.deepEqual(info.series,['series_one']);assert.deepEqual(info.artists,['artist_one']);
+info=get({meta:{author:'just_the_uploader',tags:'some_general_tags'}});
+assert.deepEqual(info.characters,[]);assert.deepEqual(info.series,[]);assert.deepEqual(info.artists,[]);
+info=get({meta:{tag_string_character:'',tag_string_copyright:'',tag_string_artist:'unknown_artist artist_request'}});
+assert.deepEqual(info.artists,[]);assert.equal(info.detailsReady,true);
+console.log('PASS: categorized Character/Series/Artist metadata across Danbooru, e621 and Moebooru; no uploader falsely labelled as artist.');
