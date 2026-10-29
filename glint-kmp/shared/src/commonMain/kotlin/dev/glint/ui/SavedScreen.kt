@@ -22,7 +22,6 @@ import dev.glint.app.Overlay
 import dev.glint.model.Pin
 import dev.glint.sources.Accounts
 import dev.glint.sources.Sources
-import kotlinx.coroutines.launch
 
 @Composable
 fun SavedScreen(store: GlintStore) {
@@ -174,18 +173,15 @@ fun LikesPane(store: GlintStore) {
                         Empty(if (searching) "No likes match this search." else "No likes here yet.")
                     (if (searching) store.likesApiMore else !f.done) ->
                         RetrySpinButton("More") {
-                            if (searching) store.scope.launchLikesMore(store) else store.loadFavorites(reset = false)
+                            if (searching) store.loadMoreLikes() else store.loadFavorites(reset = false)
                         }
                     else -> {}
                 }
             }
         },
         onEndReached = {
-            if (searching) {
-                if (!store.likesApiBusy && store.likesApiMore) {
-                    store.scope.launch { store.loadLikesApiSearch() }
-                }
-            } else if (!f.busy && !f.done && f.err.isEmpty()) store.loadFavorites(reset = false)
+            if (searching) store.loadMoreLikes()
+            else if (!f.busy && !f.done && f.err.isEmpty()) store.loadFavorites(reset = false)
         },
     )
 }

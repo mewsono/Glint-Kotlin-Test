@@ -718,6 +718,18 @@ class GlintStore(val scope: CoroutineScope) {
         }
     }
 
+    /**
+     * UI entry point for Likes-search pagination (footer "More" button and
+     * infinite scroll) — the PWA's "load more" for source-confirmed Likes.
+     * Guards against double loads and runs on the store's own scope.
+     */
+    fun loadMoreLikes() {
+        if (likesApiBusy || !likesApiMore || likesApiQuery().isEmpty()) return
+        likesApiError = ""
+        likesApiBusy = true
+        likesApiJob = scope.launch { loadLikesApiSearch() }
+    }
+
     fun likesSearchCountLabel(): String {
         if (likesApiQuery().isEmpty()) {
             val f = favState()
