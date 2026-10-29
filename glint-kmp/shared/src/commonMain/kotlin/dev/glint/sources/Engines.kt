@@ -1,14 +1,6 @@
 package dev.glint.sources
 
-import dev.glint.core.QueryParams
-import dev.glint.core.arrOrNull
-import dev.glint.core.asStringOr
-import dev.glint.core.el
-import dev.glint.core.int
-import dev.glint.core.long
-import dev.glint.core.obj
-import dev.glint.core.objOrNull
-import dev.glint.core.str
+import dev.glint.core.*
 import dev.glint.model.AuthRecord
 import dev.glint.model.HtmlPost
 import dev.glint.model.ListRequest
@@ -656,7 +648,7 @@ object Engines {
             ListRequest(url = "https://rule34.paheal.net/graphql", method = "POST", body = body)
         },
         parser = { j ->
-            (j as? JsonOrText.J)?.element?.objOrNull?.obj("data")?.let { d -> d.arr("post") ?: d.arr("posts") }
+            (j as? JsonOrText.J)?.element?.objOrNull?.obj("data")?.let { d: JsonObject -> d.arr("post") ?: d.arr("posts") }
                 ?.mapNotNull { it.objOrNull?.let { o -> RawPost(json = o) } } ?: emptyList()
         },
         mapper = { raw ->

@@ -1,11 +1,6 @@
 package dev.glint.data
 
-import dev.glint.core.LenientJson
-import dev.glint.core.Platform
-import dev.glint.core.asStringOr
-import dev.glint.core.el
-import dev.glint.core.objOrNull
-import dev.glint.core.parseJsonOrNull
+import dev.glint.core.*
 import dev.glint.model.BookmarkRecord
 import dev.glint.model.PersistedState
 import dev.glint.model.Pin
@@ -50,7 +45,7 @@ object Store {
     /** Accept the PWA's own pb2 blob (it has a different field layout). */
     fun fromLegacyJson(raw: JsonObject): PersistedState {
         fun strList(key: String): List<String> =
-            raw.el(key)?.arrOrNullSafe()?.mapNotNull { el ->
+            raw.el(key).arrOrNull?.mapNotNull { el ->
                 when (el) {
                     is JsonPrimitive -> el.content.trim().takeIf { it.isNotEmpty() && it.length <= 240 }
                     is JsonObject -> el.str("id").takeIf { it.isNotEmpty() }
@@ -58,7 +53,7 @@ object Store {
                 }
             } ?: emptyList()
 
-        val bookmarks = raw.el("bookmarks")?.arrOrNullSafe()?.mapNotNull { el ->
+        val bookmarks = raw.el("bookmarks").arrOrNull?.mapNotNull { el ->
             when (el) {
                 is JsonObject -> {
                     val id = el.str("id").trim()
@@ -74,7 +69,7 @@ object Store {
         }?.toMap() ?: emptyMap()
 
         val live = raw.el("live")?.objOrNull?.mapValues { (_, v) ->
-            v.arrOrNullSafe()?.mapNotNull { decodePin(it) } ?: emptyList()
+            v.arrOrNull?.mapNotNull { decodePin(it) } ?: emptyList()
         } ?: emptyMap()
 
         val iq = raw.el("iq")?.objOrNull
@@ -84,7 +79,7 @@ object Store {
             hidden = strList("hidden"),
             likes = strList("likes"),
             pinCache = pinCache,
-            custom = raw.el("custom")?.arrOrNullSafe()?.mapNotNull { decodePin(it) } ?: emptyList(),
+            custom = raw.el("custom").arrOrNull?.mapNotNull { decodePin(it) } ?: emptyList(),
             live = live,
             lpage = raw.el("lpage")?.objOrNull?.mapNotNull { (k, v) ->
                 v.asStringOr("").toDoubleOrNull()?.toInt()?.let { k to it }
@@ -117,10 +112,6 @@ object Store {
         )
     }
 
-    private fun JsonElement.arrOrNullSafe(): JsonArray? = this as? JsonArray
-
-    private fun JsonObject.str(key: String, default: String = ""): String = el(key).asStringOr(default)
-
     /** Port of runtime.js pin(): sanitize one pin record from untrusted JSON. */
     fun decodePin(value: JsonElement?): Pin? {
         val o = value?.objOrNull ?: return null
@@ -132,7 +123,7 @@ object Store {
             return if (Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(v)) v else ""
         }
         fun list(key: String): List<String> =
-            o.el(key)?.arrOrNullSafe()?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
+            o.el(key).arrOrNull?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList()
         return Pin(
             id = id,
             sid = o.str("sid"),

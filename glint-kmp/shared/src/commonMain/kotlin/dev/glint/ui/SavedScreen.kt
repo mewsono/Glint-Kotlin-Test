@@ -22,6 +22,7 @@ import dev.glint.app.Overlay
 import dev.glint.model.Pin
 import dev.glint.sources.Accounts
 import dev.glint.sources.Sources
+import kotlinx.coroutines.launch
 
 @Composable
 fun SavedScreen(store: GlintStore) {
@@ -180,14 +181,13 @@ fun LikesPane(store: GlintStore) {
             }
         },
         onEndReached = {
-            if (searching) { if (!store.likesApiBusy && store.likesApiMore) store.scope.launchLikesMore(store) }
-            else if (!f.busy && !f.done && f.err.isEmpty()) store.loadFavorites(reset = false)
+            if (searching) {
+                if (!store.likesApiBusy && store.likesApiMore) {
+                    store.scope.launch { store.loadLikesApiSearch() }
+                }
+            } else if (!f.busy && !f.done && f.err.isEmpty()) store.loadFavorites(reset = false)
         },
     )
-}
-
-private fun kotlinx.coroutines.CoroutineScope.launchLikesMore(store: GlintStore) {
-    kotlinx.coroutines.launch { store.loadLikesApiSearch() }
 }
 
 /* -------------------------------------------------------------- explore */
