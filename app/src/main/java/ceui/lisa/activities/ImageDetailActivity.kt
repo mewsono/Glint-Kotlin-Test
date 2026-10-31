@@ -116,8 +116,6 @@ class ImageDetailActivity : BaseActivity<ActivityImageDetailBinding?>() {
 
     private val translationViewModel by viewModels<ImageTranslationViewModel>()
 
-    @Inject lateinit var mangaBatchTranslateCenter: MangaBatchTranslateCenter
-
     private var localIllust: List<String>? = ArrayList()
     private var currentPage: TextView? = null
     private var downloadSingle: TextView? = null
