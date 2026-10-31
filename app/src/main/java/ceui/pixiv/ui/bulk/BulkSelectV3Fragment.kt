@@ -24,7 +24,7 @@ import ceui.lisa.utils.GlideUtil
 import ceui.lisa.utils.Params
 import ceui.pixiv.api.model.Illust
 import ceui.pixiv.actions.PixivActions
-import ceui.pixiv.chat.base.viewModels
+import androidx.fragment.app.viewModels
 import ceui.pixiv.ui.common.tintMenuIconsWhite
 import ceui.pixiv.ui.detail.showV3Menu
 import ceui.pixiv.ui.download.DownloadExportLinks

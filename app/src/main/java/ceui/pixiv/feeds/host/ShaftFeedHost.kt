@@ -6,9 +6,8 @@ import androidx.fragment.app.Fragment
 import ceui.lisa.R
 import ceui.pixiv.witstudio.theme.V3Palette
 import ceui.pixiv.ui.common.getHumanReadableMessage
-import ceui.pixiv.ui.debug.openNetworkTestPage
 import ceui.pixiv.services.requireNetworkStateManager
-import ceui.pixiv.chat.base.isNetworkClassError
+import ceui.pixiv.utils.isNetworkClassError
 import ceui.pixiv.feeds.FeedFramework
 import ceui.pixiv.feeds.FeedHost
 import ceui.pixiv.feeds.FeedTheme
@@ -82,5 +81,4 @@ object ShaftFeedHost : FeedHost {
         throwable.isNetworkClassError()
 
     /** 打开「网络测试」页，与侧边栏 nav_network_test 走同一条 TemplateActivity 路由。 */
-    override fun openNetworkTest(context: Context) = openNetworkTestPage(context)
 }

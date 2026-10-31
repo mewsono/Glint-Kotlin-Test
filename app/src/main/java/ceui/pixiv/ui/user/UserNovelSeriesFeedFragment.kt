@@ -14,7 +14,7 @@ import ceui.lisa.activities.TemplateActivity
 import ceui.lisa.databinding.FragmentToolbarFeedBinding
 import ceui.lisa.databinding.RecyNovelSeriesOfUserBinding
 import ceui.pixiv.api.Client
-import ceui.pixiv.chat.base.viewModels
+import androidx.fragment.app.viewModels
 import ceui.lisa.model.ListNovelSeries
 import ceui.lisa.models.NovelSeriesItem
 import ceui.lisa.utils.Common

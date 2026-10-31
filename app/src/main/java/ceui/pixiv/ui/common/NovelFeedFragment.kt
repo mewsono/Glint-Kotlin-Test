@@ -26,7 +26,7 @@ import ceui.pixiv.witstudio.theme.V3Palette
 import ceui.pixiv.api.Client
 import ceui.loxia.Novel
 import ceui.pixiv.actions.PixivActions
-import ceui.pixiv.chat.base.viewModels
+import androidx.fragment.app.viewModels
 import ceui.pixiv.feeds.FeedCell
 import ceui.pixiv.feeds.FeedFragment
 import ceui.pixiv.feeds.FeedItem

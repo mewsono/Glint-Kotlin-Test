@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import ceui.lisa.R
 import ceui.lisa.activities.Shaft
 import ceui.pixiv.api.model.WorkEditableTag
-import ceui.pixiv.chat.base.toUserMessage
+import ceui.pixiv.utils.toUserMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow

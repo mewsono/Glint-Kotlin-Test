@@ -28,22 +28,11 @@ import ceui.lisa.fragments.FragmentWebView
 import ceui.lisa.fragments.FragmentWorkSpace
 import ceui.lisa.fragments.SettingsCatalog
 import ceui.lisa.fragments.StreetMainFragment
-import ceui.lisa.update.FragmentVersionHistory
 import ceui.lisa.utils.Params
-import ceui.loxia.Novel
-import ceui.loxia.User
 import ceui.pixiv.api.model.Illust
 import ceui.pixiv.api.model.ObjectType
 import ceui.pixiv.cache.ObjectPool
-import ceui.pixiv.chat.ui.ChatRoomListFragment
-import ceui.pixiv.chat.ui.DemoChatListFragment
-import ceui.pixiv.db.mirror.trackBookmarkShelfVisit
-import ceui.pixiv.plaza.ui.PlazaComposeFragment
-import ceui.pixiv.plaza.ui.PlazaFragment
-import ceui.pixiv.plaza.ui.PlazaPostDetailFragment
 import ceui.pixiv.services.appServices
-import ceui.pixiv.snapshot.SnapshotBackfillFragment
-import ceui.pixiv.snapshot.SnapshotManagerFragment
 import ceui.pixiv.ui.account.AccountSwitchV3Fragment
 import ceui.pixiv.ui.account.EmailBackupV3Fragment
 import ceui.pixiv.ui.bulk.BulkSelectHandoff
@@ -55,7 +44,6 @@ import ceui.pixiv.ui.collection.LikeNovelFeedFragment
 import ceui.pixiv.ui.comic.ComicTopFeedFragment
 import ceui.pixiv.ui.comic.reader.ComicReaderV3Fragment
 import ceui.pixiv.ui.comments.CommentsFragment
-import ceui.pixiv.ui.debug.NetworkTestFragment
 import ceui.pixiv.ui.detail.ArtworkV3Fragment
 import ceui.pixiv.ui.detail.IllustSeriesFragment
 import ceui.pixiv.ui.detail.RelatedIllustFeedFragment
@@ -73,7 +61,6 @@ import ceui.pixiv.ui.flag.FlagReasonFragment
 import ceui.pixiv.ui.home.NiceFriendIllustFeedFragment
 import ceui.pixiv.ui.home.RecmdMangaFeedFragment
 import ceui.pixiv.ui.home.WalkthroughFeedFragment
-import ceui.pixiv.ui.interpolate.RifeDownloadFragment
 import ceui.pixiv.ui.notification.InfoCategoryListFragment
 import ceui.pixiv.ui.notification.NotificationPagerFragment
 import ceui.pixiv.ui.notification.NotificationViewMoreFragment
@@ -83,10 +70,6 @@ import ceui.pixiv.ui.novel.NovelTextFragment
 import ceui.pixiv.ui.novel.local.LocalLibraryFragment
 import ceui.pixiv.ui.novel.reader.NovelReaderV3Fragment
 import ceui.pixiv.ui.pinned.PinnedTabsFragment
-import ceui.pixiv.ui.prime.CorpusTagDetailFragment
-import ceui.pixiv.ui.prime.CorpusTagsFragment
-import ceui.pixiv.ui.prime.PrimeTagDetailFragment
-import ceui.pixiv.ui.prime.PrimeTagsFragment
 import ceui.pixiv.ui.recommend.AI_ONLY
 import ceui.pixiv.ui.recommend.ArtistRankFeedFragment
 import ceui.pixiv.ui.recommend.BookmarkRankFragment
@@ -111,15 +94,6 @@ import ceui.pixiv.ui.settings.DownloadPathSettingsFragment
 import ceui.pixiv.ui.settings.NovelHeaderSettingsFragment
 import ceui.pixiv.ui.settings.ThemeColorFeedFragment
 import ceui.pixiv.ui.synonym.SynonymDictFragment
-import ceui.pixiv.ui.translate.ComicTextDetectorDownloadFragment
-import ceui.pixiv.ui.translate.MangaOcrDownloadFragment
-import ceui.pixiv.ui.translate.TranslationModelDownloadFragment
-import ceui.pixiv.ui.upscale.FragmentAiUpscale
-import ceui.pixiv.ui.upscale.RembgHighlightFragment
-import ceui.pixiv.ui.upscale.RembgModelDownloadFragment
-import ceui.pixiv.ui.upscale.RembgPreviewFragment
-import ceui.pixiv.ui.upscale.UpscaleCompareFragment
-import ceui.pixiv.ui.usage.Nana7miUsageFragment
 import ceui.pixiv.ui.user.FollowUserFeedFragment
 import ceui.pixiv.ui.user.LikeUsersFeedFragment
 import ceui.pixiv.ui.user.NiceFriendFeedFragment
@@ -170,7 +144,6 @@ object TemplateRouteFactory {
                     intent.getStringExtra(Params.URL),
                     intent.getBooleanExtra(Params.PREFER_PRESERVE, false),
                 )
-            TemplateRoute.NANA7MI_USAGE -> Nana7miUsageFragment()
             TemplateRoute.SETTINGS -> FragmentSettingsHub()
             TemplateRoute.SETTINGS_CATEGORY ->
                 SettingsCatalog.fragmentFor(intent.getStringExtra(SettingsCatalog.EXTRA_CATEGORY))
@@ -272,11 +245,6 @@ object TemplateRouteFactory {
                     Params.getUserId(intent),
                     intent.getStringExtra(Params.KEY_WORD),
                 )
-            TemplateRoute.REQUEST_PLAN_DETAIL ->
-                RequestPlanDetailFragment.newInstance(
-                    intent.requireSerializable(Params.CONTENT, RequestPlan::class.java),
-                    IntentCompat.getSerializableExtra(intent, Params.USER_MODEL, User::class.java),
-                )
             TemplateRoute.USER_MANGA ->
                 UserMangaFeedFragment.newInstance(
                     Params.getUserId(intent),
@@ -303,26 +271,7 @@ object TemplateRouteFactory {
                     intent.getStringExtra(Params.KEY_WORD),
                 )
             TemplateRoute.USER_NOVELS -> UserNovelFeedFragment.newInstance(Params.getUserId(intent))
-            TemplateRoute.NOVEL_DETAIL -> {
-                val bean =
-                    IntentCompat.getSerializableExtra(intent, Params.CONTENT, Novel::class.java)
-                NovelTextFragment.newInstance(bean?.id ?: intent.getLongExtra(Params.NOVEL_ID, 0L))
             }
-            TemplateRoute.NOVEL_READER -> {
-                val localUri = intent.getStringExtra(Params.LOCAL_TXT_URI)
-                val bean =
-                    IntentCompat.getSerializableExtra(intent, Params.CONTENT, Novel::class.java)
-                when {
-                    !localUri.isNullOrEmpty() ->
-                        NovelReaderV3Fragment.newInstanceLocal(
-                            localUri,
-                            intent.getStringExtra(Params.LOCAL_TXT_TITLE),
-                            intent.getStringExtra(Params.LOCAL_TXT_KEY),
-                        )
-                    bean != null -> NovelReaderV3Fragment.newInstance(bean)
-                    else ->
-                        NovelReaderV3Fragment.newInstance(intent.getLongExtra(Params.NOVEL_ID, 0L))
-                }
             }
             TemplateRoute.LOCAL_NOVEL_LIBRARY -> LocalLibraryFragment()
             TemplateRoute.COMIC_READER -> {
@@ -342,33 +291,6 @@ object TemplateRouteFactory {
                 FragmentImageDetail.newInstance(
                     intent.getStringExtra(Params.URL),
                     intent.getStringExtra(Params.TITLE),
-                )
-            TemplateRoute.UPSCALE_COMPARE ->
-                UpscaleCompareFragment.newInstance(
-                    intent.requireString("upscaled_path"),
-                    intent.requireString("original_path"),
-                )
-            TemplateRoute.AI_UPSCALE -> FragmentAiUpscale()
-            TemplateRoute.REMBG_HIGHLIGHT ->
-                RembgHighlightFragment.newInstance(
-                    intent.requireString("original_path"),
-                    intent.requireString("rembg_path"),
-                )
-            TemplateRoute.REMBG_PREVIEW ->
-                RembgPreviewFragment.newInstance(intent.requireString("rembg_path"))
-            TemplateRoute.REMBG_MODEL_DOWNLOAD ->
-                RembgModelDownloadFragment.newInstance(intent.requireString("model_name"))
-            TemplateRoute.TRANSLATION_MODEL_DOWNLOAD ->
-                TranslationModelDownloadFragment.newInstance(
-                    intent.requireString("translation_model_name")
-                )
-            TemplateRoute.RIFE_MODEL_DOWNLOAD ->
-                RifeDownloadFragment.newInstance(intent.requireString("rife_model_name"))
-            TemplateRoute.MANGA_OCR_MODEL_DOWNLOAD ->
-                MangaOcrDownloadFragment.newInstance(intent.requireString("manga_ocr_model_name"))
-            TemplateRoute.COMIC_TEXT_DETECTOR_MODEL_DOWNLOAD ->
-                ComicTextDetectorDownloadFragment.newInstance(
-                    intent.requireString("ctd_model_name")
                 )
             TemplateRoute.EDIT_ACCOUNT -> FragmentEditAccount()
             // V3 账号备份/恢复页（pixshaft-api /v1/account/*）。与 Pixiv 原生「绑定邮箱」
@@ -405,22 +327,8 @@ object TemplateRouteFactory {
                 UserNovelSeriesFeedFragment.newInstance(Params.getUserId(intent))
             TemplateRoute.FEATURE_LIST -> FeatureFeedFragment()
             TemplateRoute.WORKSPACE -> FragmentWorkSpace()
-            TemplateRoute.PRIME_TAGS -> PrimeTagsFragment()
             TemplateRoute.PINNED_CONTENT -> PinnedTabsFragment()
             // key = 老 assets 文件名里那段 sha256，现在是 pixshaft-api 的路径参数。
-            TemplateRoute.PRIME_TAG_DETAIL ->
-                PrimeTagDetailFragment.newInstance(
-                    intent.requireString("name"),
-                    intent.requireString("key"),
-                )
-            TemplateRoute.CORPUS_LIBRARY -> CorpusTagsFragment()
-            TemplateRoute.CORPUS_TAG_DETAIL ->
-                CorpusTagDetailFragment.newInstance(
-                    intent.requireString(CorpusTagsFragment.ARG_TAG),
-                )
-            // 已注册或首次在线访问 → 进入本地库，边回填边浏览；全量完成后再开放筛选。
-            // 带 Params.FLAG 的 intent 是本地库自己的「原始收藏列表」入口发来的，必须原样给老页面，
-            // 否则用户从库里点进去会被立刻重定向回来，两个页面互相踢皮球。
             TemplateRoute.MY_ILLUST_COLLECTION -> {
                 val wantsClassic = intent.getBooleanExtra(ceui.lisa.utils.Params.FLAG, false)
                 if (
@@ -514,7 +422,6 @@ object TemplateRouteFactory {
                 RelatedUserFeedFragment.newInstance(Params.getUserId(intent))
             TemplateRoute.MARKDOWN ->
                 FragmentMarkdown.newInstance(intent.getStringExtra(Params.URL))
-            TemplateRoute.VERSION_HISTORY -> FragmentVersionHistory()
             TemplateRoute.DISCOVERY -> DiscoveryFeedFragment()
             TemplateRoute.WEB_DISCOVERY -> WebDiscoveryFragment()
             TemplateRoute.RECENT_RECOMMEND -> FragmentRecentRecommend()
@@ -556,19 +463,11 @@ object TemplateRouteFactory {
                     intent.getIntExtra(Params.INDEX, 0),
                 )
             TemplateRoute.EVENT_HISTORY -> FragmentEventHistory()
-            TemplateRoute.DEBUG_NETWORK_TEST -> NetworkTestFragment()
-            // 同义词词典管理页（issue #904 按标签收藏优化）
             TemplateRoute.SYNONYM_DICT -> SynonymDictFragment()
             // peer_uid > 0 → 与该 pixiv 用户 1v1；否则 → 会话列表（全员公屏 + 本地碰过的 1v1）。
             // 列表行点进来会带 peer_uid 再走一次这里，所以单聊页的打开方式和以前完全一样。
-            TemplateRoute.CHAT -> {
-                val peerUid = intent.getLongExtra(TemplateActivity.EXTRA_CHAT_PEER_UID, 0L)
-                if (peerUid > 0L) DemoChatListFragment.newInstanceForPeer(peerUid)
-                else ChatRoomListFragment()
             }
             // 显式「打开全员公屏」入口：会话列表点 Global 行用。不带 peer_uid 走 CHAT 会回到列表本身。
-            TemplateRoute.CHAT_GLOBAL_ROOM -> DemoChatListFragment()
-            TemplateRoute.PLAZA -> PlazaFragment()
             TemplateRoute.PLAZA_BLOCKS -> ceui.pixiv.plaza.ui.PlazaBlockedUsersFragment().apply {
                 arguments = bundleOf(
                     "mode" to "blocks",
@@ -585,129 +484,8 @@ object TemplateRouteFactory {
             }
             // 从插画 V3「分享至广场」入口进来会带 ILLUST_ID,需透传给 compose fragment 预附这张 illust;
             // 广场右上「+」入口不带,走空白编辑器。
-            TemplateRoute.PLAZA_COMPOSE ->
-                PlazaComposeFragment().apply {
-                    val prefillIllustId =
-                        intent.getLongExtra(PlazaComposeFragment.ARG_PREFILL_ILLUST_ID, 0L)
-                    arguments =
-                        bundleOf(
-                            PlazaComposeFragment.ARG_PREFILL_ILLUST_ID to prefillIllustId,
-                            PlazaComposeFragment.ARG_OBJECT_TYPE to
-                                intent.getStringExtra(PlazaComposeFragment.ARG_OBJECT_TYPE),
-                            PlazaComposeFragment.ARG_REPLY_TO to
-                                intent.getLongExtra(PlazaComposeFragment.ARG_REPLY_TO, 0L),
-                        )
-                }
-            // 从广场卡片点 illust 缩略走这条;只带 ILLUST_ID, ArtworkV3ViewModel 自己按 id lazy load。
             TemplateRoute.PLAZA_OPEN_ILLUST ->
                 ArtworkV3Fragment.newInstance(Params.getLongCompat(intent, Params.ILLUST_ID))
-            TemplateRoute.PLAZA_POST_DETAIL ->
-                PlazaPostDetailFragment.newInstance(
-                    intent.getLongExtra(PlazaPostDetailFragment.EXTRA_POST_ID, 0L)
-                )
             TemplateRoute.NOTIFICATION_CENTER -> NotificationPagerFragment()
             TemplateRoute.NOTIFICATION_VIEW_MORE -> NotificationViewMoreFragment()
             TemplateRoute.INFO_CATEGORY -> InfoCategoryListFragment()
-            TemplateRoute.SNAPSHOT_MANAGER -> SnapshotManagerFragment()
-            TemplateRoute.SNAPSHOT_BACKFILL -> SnapshotBackfillFragment()
-            TemplateRoute.SNAPSHOT_VIEW ->
-                ArtworkV3Fragment.newInstanceSnapshot(
-                    intent.requireString(SnapshotManagerFragment.ARG_SNAPSHOT_ID),
-                    intent.getBooleanExtra(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, false),
-                )
-            TemplateRoute.SNAPSHOT_VIEW_CLASSIC ->
-                FragmentIllust().apply {
-                    arguments =
-                        bundleOf(
-                            "illust_id" to 0L,
-                            SnapshotManagerFragment.ARG_SNAPSHOT_ID to
-                                intent.getStringExtra(SnapshotManagerFragment.ARG_SNAPSHOT_ID),
-                            SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO to
-                                intent.getBooleanExtra(
-                                    SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO,
-                                    false,
-                                ),
-                        )
-                }
-            TemplateRoute.SNAPSHOT_COMMENTS ->
-                CommentsFragment().apply {
-                    arguments =
-                        bundleOf(
-                            "objectId" to intent.getLongExtra("objectId", 0L),
-                            "objectArthurId" to intent.getLongExtra("objectArthurId", 0L),
-                            "objectType" to intent.getStringExtra("objectType"),
-                            SnapshotManagerFragment.ARG_SNAPSHOT_ID to
-                                intent.getStringExtra(SnapshotManagerFragment.ARG_SNAPSHOT_ID),
-                            SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO to
-                                intent.getBooleanExtra(
-                                    SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO,
-                                    false,
-                                ),
-                        )
-                }
-        }
-
-    private fun commentsFragment(intent: Intent): CommentsFragment {
-        val illustId = Params.getLongCompat(intent, Params.ILLUST_ID)
-        if (illustId != 0L) {
-            val hit: Illust? = ObjectPool.getIllust(illustId).value
-            return CommentsFragment.newInstance(
-                illustId,
-                hit?.user?.id ?: 0L,
-                ObjectType.ILLUST,
-            )
-        }
-        val novelId = Params.getLongCompat(intent, Params.NOVEL_ID)
-        val hit: Novel? = ObjectPool.getNovel(novelId).value
-        return CommentsFragment.newInstance(novelId, hit?.user?.id ?: 0L, ObjectType.NOVEL)
-    }
-
-    /** 目标页的 newInstance 参数非空；缺 extra 是调用方的 bug，报清楚是哪个 key 而不是裸 NPE。 */
-    private fun Intent.requireString(key: String): String =
-        requireNotNull(getStringExtra(key)) {
-            "TemplateActivity route requires string extra '$key'"
-        }
-
-    private fun <T : java.io.Serializable> Intent.requireSerializable(
-        key: String,
-        clazz: Class<T>,
-    ): T =
-        requireNotNull(IntentCompat.getSerializableExtra(this, key, clazz)) {
-            "TemplateActivity route requires ${clazz.simpleName} extra '$key'"
-        }
-}
-
-/**
- * 把「用户正在打开自己的这个收藏页」记进镜像系统 —— 也就是注册这个书架。
- *
- * 老的双 tab 页自己会在 onResume 里注册（见 `LikeIllustFeedFragment`），但那已经是**页面画出来
- * 之后**的事：判定「进新版还是旧版」发生得比它更早，于是首次点击触发的那一次注册永远晚一步。
- * 在这里补一次，镜像从「用户点了入口」这一刻就开始跑，不再依赖那个即将被替代的旧页面真的被渲染。
- *
- * 走的是同一条入口函数（`trackBookmarkShelfVisit`）：隐私边界（只对**自己的**收藏生效）与
- * 「没打开过悄悄收藏就绝不注册悄悄收藏」这两条判断都在它里面，这里不另开口子，所以只注册公开书架。
- */
-private fun trackOwnBookmarkShelfVisit(contentType: ceui.pixiv.db.mirror.MirrorContentType) {
-    val uid = ceui.pixiv.session.SessionManager.loggedInUid
-    if (uid <= 0L) return
-    ceui.lisa.activities.Shaft.getContext()
-        .trackBookmarkShelfVisit(uid, Params.TYPE_PUBLIC, contentType)
-}
-
-/**
- * 本地库默认进入公开书架；只有用户切到悄悄收藏 / 私人关注后，才注册私人书架。
- */
-private fun shouldOpenBookmarkLibrary(contentType: ceui.pixiv.db.mirror.MirrorContentType): Boolean {
-    val uid = ceui.pixiv.session.SessionManager.loggedInUid
-    if (uid <= 0L) return false
-    return ceui.lisa.activities.Shaft.getContext()
-        .appServices()
-        .bookmarkMirror
-        .canOpenLibrary(
-            ceui.pixiv.db.mirror.BookmarkShelf(
-                ownerUid = uid,
-                contentType = contentType,
-                restrict = ceui.pixiv.db.mirror.MirrorRestrict.PUBLIC,
-            )
-        )
-}

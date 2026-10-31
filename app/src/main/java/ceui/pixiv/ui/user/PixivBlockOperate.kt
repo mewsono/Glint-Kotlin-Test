@@ -14,7 +14,7 @@ import ceui.loxia.User
 import ceui.pixiv.api.model.BlockSaveRequest
 import ceui.pixiv.api.Client
 import ceui.pixiv.api.CsrfTokenProvider
-import ceui.pixiv.chat.base.toUserMessage
+import ceui.pixiv.utils.toUserMessage
 import ceui.pixiv.session.SessionManager
 import ceui.pixiv.witstudio.dialog.WitDialog
 import ceui.pixiv.witstudio.dialog.WitDialogAction

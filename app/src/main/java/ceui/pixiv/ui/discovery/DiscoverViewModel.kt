@@ -12,7 +12,6 @@ import ceui.pixiv.cache.ObjectPool
 import ceui.lisa.network.ShaftApiV2
 import ceui.lisa.network.ShaftApiV2Client
 import ceui.pixiv.ui.common.IllustFeedItem
-import ceui.pixiv.ui.prime.PrimeTagIndexItem
 import com.blankj.utilcode.util.Utils
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -37,8 +36,6 @@ import android.app.Application
  */
 class DiscoverViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _primeTags = MutableLiveData<List<PrimeTagIndexItem>>()
-    val primeTags: LiveData<List<PrimeTagIndexItem>> get() = _primeTags
 
     private val _latest = MutableLiveData<List<Illust>>()
     val latest: LiveData<List<Illust>> get() = _latest
@@ -60,7 +57,6 @@ class DiscoverViewModel(application: Application) : AndroidViewModel(application
 
     /** 下拉刷新 / 双击 tab forceRefresh:重拉全部货架。 */
     fun reload(includeServerShelves: Boolean) {
-        loadTags()
         loadLatestRail()
         // 本月收藏 / 当前最热 / 隐藏神作 三条 shaft-api-v2 货架合并成一个 /discover 请求;
         // Lite 渠道不展示这三条。
@@ -146,27 +142,7 @@ class DiscoverViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun loadTags() {
-        viewModelScope.launch {
-            val items = withContext(Dispatchers.IO) {
-                try {
-                    val json = Utils.getApp().assets.open(INDEX_FILE)
-                        .bufferedReader().use { it.readText() }
-                    val type = object : TypeToken<List<PrimeTagIndexItem>>() {}.type
-                    Gson().fromJson<List<PrimeTagIndexItem>>(json, type) ?: emptyList()
-                } catch (e: Exception) {
-                    emptyList()
-                }
-            }
-            // 随机展示:每次真正构建 fragment(新 VM)重新洗牌,不再永远头三个「超电磁炮/对魔忍…」。
-            // tab 来回切 VM 不重建、started 门控住,所以不会一切换就换一批(符合用户要的口径)。
-            _primeTags.value = items.shuffled().take(TAG_LIMIT)
-        }
-    }
-
     companion object {
-        private const val INDEX_FILE = "pixiv_prime/prime_index.json"
         private const val RAIL_LIMIT = 12
-        private const val TAG_LIMIT = 15
     }
 }

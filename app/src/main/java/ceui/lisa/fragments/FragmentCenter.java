@@ -23,7 +23,6 @@ import ceui.lisa.activities.MainActivity;
 import ceui.lisa.utils.SystemBarMetrics;
 import ceui.lisa.activities.TemplateActivity;
 import ceui.lisa.activities.VActivity;
-import ceui.lisa.adapters.DiscoverTagAdapter;
 import ceui.lisa.adapters.RAdapter;
 import ceui.lisa.adapters.SkeletonRailAdapter;
 import ceui.lisa.core.Container;
@@ -36,7 +35,6 @@ import ceui.lisa.utils.Params;
 import ceui.pixiv.witstudio.theme.V3Palette;
 import ceui.lisa.view.HorizontalSpaceDecoration;
 import ceui.pixiv.ui.discovery.DiscoverViewModel;
-import ceui.pixiv.ui.prime.PrimeTagIndexItem;
 import ceui.pixiv.ui.navigation.BottomSafeInsets;
 import ceui.pixiv.ui.navigation.DrawerAvatarHelper;
 import ceui.pixiv.ui.navigation.HomeShellHost;
@@ -198,7 +196,6 @@ public class FragmentCenter extends BaseLazyFragment<FragmentNewCenterBinding> {
         styleCatChip(baseBind.catCorpusLibrary, palette, R.drawable.ic_setcat_search);
 
         discoverVM = new ViewModelProvider(this).get(DiscoverViewModel.class);
-        discoverVM.getPrimeTags().observe(getViewLifecycleOwner(), this::bindTagRail);
         discoverVM.getLatest().observe(getViewLifecycleOwner(),
                 list -> bindIllustRail(baseBind.latestSection, baseBind.latestRail, list));
         discoverVM.getSiteRecommend().observe(getViewLifecycleOwner(),
@@ -247,31 +244,6 @@ public class FragmentCenter extends BaseLazyFragment<FragmentNewCenterBinding> {
             rv.setAlpha(0f);
             rv.animate().alpha(1f).setDuration(240).start();
         }).start();
-    }
-
-    /** 热度标签货架:点卡开 PrimeTagDetail(和 PrimeTagsFragment 一致)。 */
-    private void bindTagRail(List<PrimeTagIndexItem> data) {
-        if (data == null || data.isEmpty()) {
-            baseBind.tagSection.setVisibility(View.GONE);
-            return;
-        }
-        baseBind.tagSection.setVisibility(View.VISIBLE);
-        DiscoverTagAdapter adapter = new DiscoverTagAdapter(data, mContext);
-        adapter.setOnItemClickListener((v, position, viewType) -> {
-            PrimeTagIndexItem item = data.get(position);
-            // 没有 tag 或 file_path 不合规(拿不到服务端 key)就点不开,静默忽略。
-            if (item.getTag() == null || item.getTagKey() == null) {
-                return;
-            }
-            String name = item.getTag().getTranslated_name() != null
-                    ? item.getTag().getTranslated_name() : item.getTag().getName();
-            Intent intent = new Intent(mContext, TemplateActivity.class);
-            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.PRIME_TAG_DETAIL.key);
-            intent.putExtra("name", name);
-            intent.putExtra("key", item.getTagKey());
-            startActivity(intent);
-        });
-        crossfadeSwap(baseBind.tagRail, adapter);
     }
 
     /**

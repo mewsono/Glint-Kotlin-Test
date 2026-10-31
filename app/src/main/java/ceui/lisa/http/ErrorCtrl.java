@@ -10,7 +10,7 @@ import ceui.lisa.models.Error500Obj;
 import ceui.lisa.models.ErrorResponse;
 import ceui.lisa.models.ErrorResponse2;
 import ceui.lisa.utils.Common;
-import ceui.pixiv.chat.base.AppErrorExtKt;
+import ceui.pixiv.utils.UserMessageKt;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import retrofit2.HttpException;
@@ -18,7 +18,7 @@ import timber.log.Timber;
 
 /**
  * pixiv 请求失败的统一提示：解析 app-api 的业务错误体（validation_errors / invalid_grant /
- * error.message 等）弹 toast，解析不出来则退到 {@link AppErrorExtKt#toUserMessage}。
+ * error.message 等）弹 toast，解析不出来则退到 {@link UserMessageKt#toUserMessage}。
  * 协程链路 catch 到异常后直接调 {@link #handleError}。
  *
  * <p>最先分流的是 Cloudflare 拦截：那类 403 的正文是一整张 374 KB 的 HTML 拦截页，
@@ -177,7 +177,7 @@ public final class ErrorCtrl {
      * 或什么都不做的处理。
      */
     private static void showMappedMessage(Throwable e) {
-        Common.showToast(AppErrorExtKt.toUserMessage(e, Shaft.getContext()));
+        Common.showToast(UserMessageKt.toUserMessage(e, Shaft.getContext()));
     }
 
 }

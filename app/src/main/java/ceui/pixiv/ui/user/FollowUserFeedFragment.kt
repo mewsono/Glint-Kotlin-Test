@@ -14,7 +14,7 @@ import ceui.lisa.databinding.FragmentToolbarFeedBinding
 import ceui.lisa.utils.Common
 import ceui.lisa.utils.Params
 import ceui.pixiv.api.Client
-import ceui.pixiv.chat.base.toUserMessage
+import ceui.pixiv.utils.toUserMessage
 import ceui.pixiv.db.mirror.MirrorContentType
 import ceui.pixiv.db.mirror.trackBookmarkShelfVisit
 import ceui.pixiv.feeds.feedViewModels
