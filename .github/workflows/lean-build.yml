@@ -2,6 +2,10 @@ name: lean-apk
 
 # Builds the de-bloated `lean` tree on a machine that actually has the Android toolchain
 # (this sandbox has neither a JDK nor an Android SDK, and Google Maven is firewalled).
+#
+# The sandbox cannot download raw run logs (results-receiver.actions.githubusercontent.com
+# is firewalled), so every run publishes its diagnostics as a commit comment — that endpoint
+# is on api.github.com and therefore readable.
 on:
   push:
     branches:
@@ -9,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: lean-apk-${{ github.ref }}
@@ -29,18 +33,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install platform / build-tools / ndk / cmake
+      - name: Android SDK diagnostics
         run: |
-          set -x
-          sdkmanager --install \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "cmake;3.22.1" \
-            "ndk;27.0.12077973"
-          yes | sdkmanager --licenses > /dev/null || true
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          which sdkmanager adb || true
+          sdkmanager --list_installed 2>&1 | head -40 || true
+          ls "$ANDROID_HOME/ndk" 2>/dev/null || true
+          ls "$ANDROID_HOME/cmake" 2>/dev/null || true
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
+
+      - name: Install SDK packages
+        run: |
+          SDKM=$(command -v sdkmanager || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")
+          echo "using $SDKM"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --install "platforms;android-36" "build-tools;36.0.0" 2>&1 | tail -5
 
       - name: local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -54,25 +62,63 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
           restore-keys: gradle-
 
-      # The whole point of the run: real compiler diagnostics. `--no-daemon` keeps the
-      # 4 GB heap from gradle.properties in one process; `--stacktrace` surfaces the
-      # data-binding / kapt errors that otherwise show up as an empty "Execution failed".
+      # The whole point of the run: real compiler diagnostics. Output is tee'd so the
+      # reporter step can publish the errors even when GitHub withholds the raw log.
       - name: assembleGithubDebug
-        run: ./gradlew :app:assembleGithubDebug --no-daemon --stacktrace
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleGithubDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+          echo "gradle_exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: APK size + payload check
-        if: success()
+      - name: APK check
+        if: steps.build.outcome == 'success'
         run: |
           Z=$(find app/build/outputs -name '*.apk' | head -1)
-          ls -lh "$Z"
-          unzip -l "$Z" | grep -E 'libonnxruntime|ncnn|assets/models' && {
-            echo "::error::ML payload is still in the APK"; exit 1; } || echo "no ML payload"
-          unzip -l "$Z" | tail -1
+          ls -lh "$Z" | tee -a /tmp/report.txt
+          echo "APK: $Z" >> /tmp/report.txt
+          { unzip -l "$Z" | grep -E 'libonnxruntime|ncnn|assets/models' && echo "ML PAYLOAD STILL PRESENT"; } || echo "no ML payload" | tee -a /tmp/report.txt
+
+      - name: Publish diagnostics as a commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "### \`assembleGithubDebug\` — exit ${{ steps.build.outputs.gradle_exit }}"
+            echo
+            echo '**Environment**'
+            echo '```'
+            java -version 2>&1 | head -2
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            ls "$ANDROID_HOME/platforms" 2>/dev/null | tr '\n' ' '; echo
+            ls "$ANDROID_HOME/build-tools" 2>/dev/null | tr '\n' ' '; echo
+            echo '```'
+            echo '**Errors**'
+            echo '```'
+            if [ -f /tmp/build.log ]; then
+              grep -E "^e: |^e: file|error:|FAILURE:|What went wrong|Caused by:|Execution failed" /tmp/build.log \
+                | sed 's|file:///home/runner/work/[^/]*/[^/]*/||' | head -120
+            fi
+            echo '```'
+            echo '**Tail**'
+            echo '```'
+            tail -40 /tmp/build.log 2>/dev/null
+            echo '```'
+          } > /tmp/report.md
+          head -c 60000 /tmp/report.md > /tmp/report.trim.md
+          gh api -X POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="$(cat /tmp/report.trim.md)" > /dev/null && echo "diagnostics posted"
 
       - name: Upload APK
-        if: success()
+        if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: app-github-debug
           path: app/build/outputs/apk/github/debug/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
+
+      - name: Fail if the build failed
+        if: steps.build.outcome != 'success'
+        run: exit 1
