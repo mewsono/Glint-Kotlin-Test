@@ -1,0 +1,65 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    ext.kotlin_version = '2.2.21'
+    // 顺序即解析顺序：先 google()/mavenCentral() 命中绝大多数坐标，jitpack 垫底只兜
+    // com.github.* 。曾经排在最前的 jcenter / oss.jfrog.org / jsoup.org / jboss /
+    // sonatype-snapshots 已全部移除——jcenter 2021 年 sunset、oss.jfrog.org 实测 404、
+    // jsoup.org 压根不是 maven 仓库（jsoup 在 mavenCentral），后两个本仓无任何坐标使用。
+    // 它们只会让每个依赖多做几次注定失败的 HTTP 往返，并在域名彻底撤掉那天变成构建事故。
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = "https://plugins.gradle.org/m2/" }
+        maven {
+            url = "https://jitpack.io"
+            // 「只兜 com.github.*」不能只写在注释里：加 content filter 后其余坐标
+            // 根本不会去 jitpack 发请求，也防止它抢答非 GitHub 坐标。
+            content { includeGroupByRegex 'com\\.github\\..*' }
+        }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:9.0.1'
+        // com.android.legacy-kapt（:app 的 kapt）单独发布在 gradle-kotlin 里，版本必须与 AGP 一致。
+        classpath 'com.android.tools.build:gradle-kotlin:9.0.1'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // kotlinter 会把 kotlin-compiler-embeddable 拉进 buildscript classpath
+        // 与 Kotlin 2.1 KGP 冲突（GradleKotlinCompilerWorkArguments 序列化失败）。
+        // 暂时停用；需要格式化时独立跑 ktlint 即可。
+        // classpath "org.jmailen.gradle:kotlinter-gradle:4.4.1"
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '2.2.21' apply false
+    // KSP 自 2.3.0 起版本号与 Kotlin 解耦，不再需要尾号对齐。
+    // :app 仍用 kapt（Glide 编译器只有 kapt 版），新模块一律用 KSP —— kapt 在 Kotlin 2.x
+    // 已进入维护模式，且会把 kotlin-compiler-embeddable 拖进 classpath（见 buildscript 里
+    // kotlinter 被停用的注释，同一个坑）。
+    id 'com.google.devtools.ksp' version '2.3.12' apply false
+    alias(libs.plugins.hilt) apply false
+}
+
+allprojects {
+    // 同上：死仓库已移除，google()/mavenCentral() 提到最前。
+    // aliyun 保留在末位作为国内网络的兜底镜像。
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url = 'https://jitpack.io'
+            // 本仓所有 jitpack 坐标都是 com.github.*；过滤掉其余 group，别的依赖
+            // 不再对 jitpack 发注定 404 的探测请求。
+            content { includeGroupByRegex 'com\\.github\\..*' }
+        }
+        maven { url = 'https://maven.aliyun.com/repository/public/' }
+//        mavenLocal()
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.layout.buildDirectory
+}

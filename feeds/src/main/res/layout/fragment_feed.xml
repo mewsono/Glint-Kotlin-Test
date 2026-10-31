@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/feed_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/feed_refresh_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/feed_list_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:overScrollMode="never" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    <!-- 首屏骨架图的容器。纯表现层：只按 FeedUiState.showFullscreenLoading 显隐(见 FeedFragment.render)。
+         具体画哪种骨架由 FeedFragment.onCreateSkeletonView 按布局决定(瀑布流 / 竖向小说卡)，
+         在 onViewCreated 塞进来；返回 null 的页面不启用骨架(转圈圈兜底)。 -->
+    <FrameLayout
+        android:id="@+id/feed_skeleton"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/feed_state_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:id="@+id/feed_loading"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <!-- 空态/错误态插画。运行时按状态换图(空态=FeedHost.emptyStateImage 给的那张 /
+             错误=ic_feed_error 路障锥,见 FeedFragment.render);两张都是灰色描边,统一用宿主
+             强调色 SRC_IN tint(日夜双模,见 FeedFragment.onViewCreated)。
+             不设 android:src —— 空态那张图归宿主,本模块没有可当默认值的资源;
+             tools:src 只喂布局预览。只在有 state 文案时显示,加载态隐藏。 -->
+        <ImageView
+            android:id="@+id/feed_empty_image"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:layout_marginBottom="8dp"
+            android:importantForAccessibility="no"
+            android:scaleType="fitCenter"
+            android:visibility="gone"
+            tools:src="@drawable/ic_feed_error" />
+
+        <!-- gravity=center：错误态是「具体原因\n点击重试」两行（FeedFragment.render），
+             不设的话第二行在 wrap_content 宽度内左对齐，歪在插画正下方。 -->
+        <TextView
+            android:id="@+id/feed_state_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:padding="16dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
+        <!-- 动作按钮：空态走页面自己的 emptyStateAction；全屏网络类错误态(断网/超时/SSL)
+             由 FeedFragment 复用为「去网络测试」。空态光给一句解释、把用户堵在死胡同里没有
+             意义——能一键去修的就摆个按钮。刻意用 TextView 而不是 MaterialButton:
+             本布局会被 AppCompat 宿主(TemplateActivity)加载,缺 Material3 attrs 会崩,
+             同 fragment_comments_feed.xml 的取舍。 -->
+        <TextView
+            android:id="@+id/feed_state_action"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/feed_state_action_bg"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:minWidth="96dp"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="11dp"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

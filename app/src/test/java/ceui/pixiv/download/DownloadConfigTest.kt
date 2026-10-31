@@ -1,0 +1,246 @@
+package ceui.pixiv.download
+
+import ceui.pixiv.download.config.BucketConfig
+import ceui.pixiv.download.config.BucketDefaults
+import ceui.pixiv.download.config.ConfigPresets
+import ceui.pixiv.download.config.DownloadConfig
+import ceui.pixiv.download.config.DownloadConfigJson
+import ceui.pixiv.download.config.OverwritePolicy
+import ceui.pixiv.download.config.StorageChoice
+import ceui.pixiv.download.model.Bucket
+import ceui.pixiv.download.template.DefaultTemplates
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class DownloadConfigTest {
+
+    private val defaults = BucketDefaults(
+        template = "default/{id}.{ext}",
+        storage = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Images),
+    )
+
+    @Test fun `fromJson drops bucket keys this version does not know`() {
+        // 更新的版本往 perBucket 写了本版本没有的 Bucket 名 —— Gson 会给出 null 键，
+        // 曾让 applyGlobalStorage 的 mapValues 直接 NPE（授权静默失败）。必须在读入时丢弃。
+        val json = """
+            {"version":1,
+             "defaults":{"template":"d/{id}.{ext}",
+                         "storage":{"kind":"media_store","collection":"Images"},
+                         "overwrite":"Replace"},
+             "perBucket":{
+                "Novel":{"template":"novels/{id}.txt"},
+                "BucketFromTheFuture":{"template":"future/{id}.{ext}"}}}
+        """.trimIndent()
+        val cfg = DownloadConfigJson.fromJson(json)
+        assertEquals(setOf(Bucket.Novel), cfg.perBucket.keys)
+        // 反序列化出的配置要能安全走完 copy/mapValues 一类的全量遍历。
+        cfg.copy(perBucket = cfg.perBucket.mapValues { (_, bc) -> bc })
+    }
+
+    @Test fun `fromJson replaces invalid backup template with json default`() {
+        val json = """
+            {"version":1,
+             "defaults":{"template":"d/{id}.{ext}",
+                         "storage":{"kind":"media_store","collection":"Images"},
+                         "overwrite":"Replace"},
+             "perBucket":{
+                "Backup":{"template":"ShaftBackups/{created:yyyyMMdd_HHmmss}.zip"}}}
+        """.trimIndent()
+        val cfg = DownloadConfigJson.fromJson(json)
+        assertEquals(DefaultTemplates.BACKUP, cfg.resolve(Bucket.Backup).template)
+    }
+
+    @Test fun `fromJson replaces backup template containing ext with json default`() {
+        val json = """
+            {"version":1,
+             "defaults":{"template":"d/{id}.{ext}",
+                         "storage":{"kind":"media_store","collection":"Images"},
+                         "overwrite":"Replace"},
+             "perBucket":{
+                "Backup":{"template":"ShaftBackups/{created:yyyyMMdd_HHmmss}.{ext}"}}}
+        """.trimIndent()
+        val cfg = DownloadConfigJson.fromJson(json)
+        assertEquals(DefaultTemplates.BACKUP, cfg.resolve(Bucket.Backup).template)
+    }
+
+    @Test fun `resolve falls back to defaults when no override`() {
+        val cfg = DownloadConfig(defaults = defaults)
+        val r = cfg.resolve(Bucket.Illust)
+        assertEquals("default/{id}.{ext}", r.template)
+        assertEquals(defaults.storage, r.storage)
+        assertEquals(OverwritePolicy.Replace, r.overwrite)
+    }
+
+    @Test fun `per-bucket override wins for specified fields only`() {
+        val cfg = DownloadConfig(
+            defaults = defaults,
+            perBucket = mapOf(
+                Bucket.Novel to BucketConfig(
+                    template = "novels/{title}.txt",
+                    overwrite = OverwritePolicy.Skip,
+                ),
+            ),
+        )
+        val r = cfg.resolve(Bucket.Novel)
+        assertEquals("novels/{title}.txt", r.template)
+        assertEquals(OverwritePolicy.Skip, r.overwrite)
+        // storage 没覆盖 → 走兜底；小说是文本桶，defaults 的相册卷会被派生成 Downloads
+        assertEquals(StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads), r.storage)
+    }
+
+    @Test fun `withBucket replaces override immutably`() {
+        val cfg = DownloadConfig(defaults = defaults)
+        val next = cfg.withBucket(Bucket.Ugoira, BucketConfig(template = "ugoira/{id}.gif"))
+        assertEquals(1, next.perBucket.size)
+        assertEquals("ugoira/{id}.gif", next.resolve(Bucket.Ugoira).template)
+        assertEquals(0, cfg.perBucket.size)   // original untouched
+    }
+
+    @Test fun `withoutOverride removes a bucket entry`() {
+        val cfg = DownloadConfig(
+            defaults = defaults,
+            perBucket = mapOf(Bucket.Illust to BucketConfig(template = "x")),
+        )
+        val next = cfg.withoutOverride(Bucket.Illust)
+        assertEquals("default/{id}.{ext}", next.resolve(Bucket.Illust).template)
+    }
+
+    // ── Global OverwritePolicy ──
+
+    @Test fun `changing defaults overwrite affects all buckets without per-bucket override`() {
+        val cfg = DownloadConfig(
+            defaults = defaults.copy(overwrite = OverwritePolicy.Skip),
+        )
+        assertEquals(OverwritePolicy.Skip, cfg.resolve(Bucket.Illust).overwrite)
+        assertEquals(OverwritePolicy.Skip, cfg.resolve(Bucket.Novel).overwrite)
+        assertEquals(OverwritePolicy.Skip, cfg.resolve(Bucket.Ugoira).overwrite)
+    }
+
+    @Test fun `default overwrite is Replace`() {
+        assertEquals(OverwritePolicy.Replace, defaults.overwrite)
+    }
+
+    // ── 非图片桶的存储兜底 ──
+
+    @Test fun `text buckets without override never fall to the Images collection`() {
+        // 「全部恢复默认」会清空 perBucket；defaults.storage 是相册卷时，备份 / 小说 / 日志
+        // 不能照抄 —— MediaStore Images 拒收非 image/*，真机上备份会静默写失败。
+        val cfg = DownloadConfig(defaults = defaults) // defaults.storage = Images
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        for (bucket in listOf(Bucket.Novel, Bucket.NovelSeries, Bucket.Caption, Bucket.Backup, Bucket.Log)) {
+            assertEquals("bucket $bucket", downloads, cfg.resolve(bucket).storage)
+        }
+        assertEquals(defaults.storage, cfg.resolve(Bucket.Illust).storage)
+        assertEquals(defaults.storage, cfg.resolve(Bucket.Ugoira).storage)
+    }
+
+    @Test fun `text bucket storage fallback keeps non-Images defaults as-is`() {
+        // JVM 单测里 Uri.parse 不可用，用 AppCache 覆盖「非 MediaStore 原样返回」那一支
+        val cache = StorageChoice.AppCache
+        assertEquals(cache, DownloadConfig(defaults = defaults.copy(storage = cache)).resolve(Bucket.Backup).storage)
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        assertEquals(downloads, DownloadConfig(defaults = defaults.copy(storage = downloads)).resolve(Bucket.Novel).storage)
+    }
+
+    @Test fun `explicit storage override still wins for text buckets`() {
+        val cache = StorageChoice.AppCache
+        val cfg = DownloadConfig(
+            defaults = defaults,
+            perBucket = mapOf(Bucket.Novel to BucketConfig(storage = cache)),
+        )
+        assertEquals(cache, cfg.resolve(Bucket.Novel).storage)
+    }
+
+    @Test fun `explicit Images override on text buckets is healed to Downloads`() {
+        // 旧版「全部恢复默认 → 套用预设」会把相册卷显式写进小说 / 备份 / 日志桶。
+        val cfg = DownloadConfig(
+            defaults = defaults,
+            perBucket = listOf(Bucket.Novel, Bucket.NovelSeries, Bucket.Backup, Bucket.Log)
+                .associateWith { BucketConfig(storage = defaults.storage) },
+        )
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        for (bucket in listOf(Bucket.Novel, Bucket.NovelSeries, Bucket.Caption, Bucket.Backup, Bucket.Log)) {
+            assertEquals(bucket.name, downloads, cfg.resolve(bucket).storage)
+        }
+    }
+
+    @Test fun `preset applied after reset-all keeps text buckets off Images`() {
+        // DownloadPathSettingsFragment.applyPreset 的取值方式：perBucket 已被清空。
+        val resetAll = DownloadConfig(defaults = defaults)
+        val next = ConfigPresets.of(
+            ConfigPresets.Id.Modern,
+            resetAll.defaults.storage,
+            resetAll.resolve(Bucket.Novel).storage,
+        )
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        assertEquals(downloads, next.perBucket[Bucket.Novel]?.storage)
+        assertEquals(defaults.storage, next.resolve(Bucket.Illust).storage)
+    }
+
+    @Test fun `backup bucket without override resolves to its own default template`() {
+        val cfg = DownloadConfig(defaults = defaults)
+        assertEquals(DefaultTemplates.BACKUP, cfg.resolve(Bucket.Backup).template)
+    }
+
+    @Test fun `backup bucket always resolves to Rename overwrite policy`() {
+        val cfg = DownloadConfig(
+            defaults = defaults.copy(overwrite = OverwritePolicy.Replace),
+            perBucket = mapOf(Bucket.Backup to BucketConfig(overwrite = OverwritePolicy.Skip)),
+        )
+        assertEquals(OverwritePolicy.Rename, cfg.resolve(Bucket.Backup).overwrite)
+    }
+
+    // ── Global StorageChoice via applyGlobalStorage logic ──
+
+    @Test fun `MediaStore global storage routes images to Pictures and downloads to Downloads`() {
+        val images = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Images)
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        val cfg = ConfigPresets.shaftClassic(images, downloads)
+
+        assertEquals(images, cfg.resolve(Bucket.Illust).storage)
+        assertEquals(images, cfg.resolve(Bucket.Ugoira).storage)
+        assertEquals(downloads, cfg.resolve(Bucket.Novel).storage)
+        assertEquals(downloads, cfg.resolve(Bucket.Backup).storage)
+        assertEquals(downloads, cfg.resolve(Bucket.Log).storage)
+    }
+
+    @Test fun `switching storage preserves templates`() {
+        val images = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Images)
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        val newStorage = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        val original = ConfigPresets.shaftClassic(images, downloads)
+
+        // Simulate applyGlobalStorage logic: replace storage, keep templates
+        val switched = original.copy(
+            defaults = original.defaults.copy(storage = newStorage),
+            perBucket = original.perBucket.mapValues { (_, bc) ->
+                bc.copy(storage = newStorage)
+            },
+        )
+
+        // Templates preserved
+        assertEquals(original.resolve(Bucket.Illust).template, switched.resolve(Bucket.Illust).template)
+        assertEquals(original.resolve(Bucket.Novel).template, switched.resolve(Bucket.Novel).template)
+        assertEquals(original.resolve(Bucket.Ugoira).template, switched.resolve(Bucket.Ugoira).template)
+
+        // Storage switched
+        assertEquals(newStorage, switched.resolve(Bucket.Illust).storage)
+        assertEquals(newStorage, switched.resolve(Bucket.Novel).storage)
+    }
+
+    @Test fun `all presets produce valid configs for every user bucket`() {
+        val images = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Images)
+        val downloads = StorageChoice.MediaStore(StorageChoice.MediaStore.Collection.Downloads)
+        val userBuckets = listOf(
+            Bucket.Illust, Bucket.Ugoira, Bucket.Novel, Bucket.NovelSeries, Bucket.Backup, Bucket.Log,
+        )
+        for (id in ConfigPresets.Id.entries) {
+            val cfg = ConfigPresets.of(id, images, downloads)
+            for (bucket in userBuckets) {
+                val r = cfg.resolve(bucket)
+                assertTrue("Preset $id bucket $bucket template blank", r.template.isNotBlank())
+            }
+        }
+    }
+}

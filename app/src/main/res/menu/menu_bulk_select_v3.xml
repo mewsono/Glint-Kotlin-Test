@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  批量选择 toolbar 单按钮：master-checkbox 模式。
+  Icon 跟选中态切：
+    - 还有未选项 → ic_select_all_24（点击全选）
+    - 全部已选   → ic_deselect_24（点击取消全选）
+  Fragment 在 refreshHeaderAndCta 里同步 setIcon + setTitle，所以 menu 里
+  这个项的初始 icon/title 只是占位，运行时会被覆盖。
+-->
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <!--
+      导出按钮：把当前**已勾选**的作品 id 拼成 pixiv 链接列表，走
+      [DownloadExportLinks.present] 弹二选一菜单（保存为 .txt / 分享）。
+      跟 confirm 按钮的"下载"语义对称：勾选后可下载，也可只导出链接事后对账。
+      没有勾选项时 disable。
+    -->
+    <item
+        android:id="@+id/action_export"
+        android:icon="@drawable/ic_v3_export_24"
+        android:title="@string/dlmgr_done_action_export"
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/action_select_toggle"
+        android:icon="@drawable/ic_select_all_24"
+        android:title="@string/bulk_select_select_all"
+        app:showAsAction="always" />
+</menu>

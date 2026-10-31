@@ -1,0 +1,40 @@
+<resources>
+
+    <!-- Declare custom theme attributes that allow changing which styles are
+         used for button bars depending on the API level.
+         ?android:attr/buttonBarStyle is new as of API 11 so this is
+         necessary to support previous API levels. -->
+    <declare-styleable name="ButtonBarContainerTheme">
+        <attr name="metaButtonBarStyle" format="reference" />
+        <attr name="metaButtonBarButtonStyle" format="reference" />
+    </declare-styleable>
+
+
+    <declare-styleable name="GradientTextView">
+        <attr name="gtv_startColor" format="color" />
+        <attr name="gtv_endColor" format="color" />
+        <attr name="gtv_angle" format="float" />
+    </declare-styleable>
+
+    <declare-styleable name="ShimmerOverlayView">
+        <!-- true：无限循环（加载骨架）；false：每次挂上窗口只扫一遍（已加载内容上的装饰） -->
+        <attr name="shimmerLoop" format="boolean" />
+    </declare-styleable>
+
+    <declare-styleable name="SpoilerParticleView">
+        <attr name="spv_cornerRadius" format="dimension" />
+    </declare-styleable>
+
+    <declare-styleable name="SegmentedToggleLayout">
+        <attr name="stl_textSize" format="dimension" />
+    </declare-styleable>
+
+    <!-- Chat subsystem (borrowed from Peanut; see ceui.pixiv.chat.base.widget.EmptyStateView) -->
+    <declare-styleable name="EmptyStateView">
+        <attr name="es_icon" format="reference" />
+        <attr name="es_title" format="string" />
+        <attr name="es_subtitle" format="string" />
+        <attr name="es_actionText" format="string" />
+    </declare-styleable>
+
+</resources>

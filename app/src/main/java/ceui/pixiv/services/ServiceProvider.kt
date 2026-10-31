@@ -1,0 +1,122 @@
+package ceui.pixiv.services
+
+import android.content.Context
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
+import ceui.lisa.viewmodel.AppLevelState
+import ceui.pixiv.actions.AccountOnlineReportOutbox
+import ceui.pixiv.actions.Nana7miSearchTelemetry
+import ceui.pixiv.actions.PixivActionQueue
+import ceui.pixiv.chat.api.ShaftChatGateway
+import ceui.pixiv.config.RemoteAppConfig
+import ceui.pixiv.db.EntityWrapper
+import ceui.pixiv.db.discovery.DiscoveryPool
+import ceui.pixiv.db.discovery.ProfileManager
+import ceui.pixiv.db.mirror.BookmarkMirrorService
+import ceui.pixiv.events.EventReporter
+import ceui.pixiv.ui.bulk.QueueDownloadManager
+import ceui.pixiv.sticker.StickerRepository
+import ceui.pixiv.ui.fanbox.FanboxWebBridge
+import ceui.pixiv.ui.novel.reader.settings.ReaderFontRepository
+import ceui.pixiv.ui.translate.MangaBatchTranslateCenter
+import ceui.pixiv.ui.translate.MangaTranslateModels
+import ceui.pixiv.utils.NetworkStateManager
+import com.tencent.mmkv.MMKV
+
+
+/**
+ * 进程级服务的唯一出口。原则：
+ *
+ * - 这里登记的都是「一个进程只该有一份」的服务。大多是 `@Singleton` + `@Inject constructor`，
+ *   由 Hilt 构造，在 [ceui.lisa.activities.Shaft] 的 super.onCreate() 时注入进 Shaft，再由
+ *   Shaft 在 onCreate 里按顺序 start；类本身是普通 class，可以在单测里 new 出第二份。
+ * - 构造函数必须廉价（不做 IO、不起协程），也不能依赖 Shaft.onCreate 里才就绪的全局状态
+ *   （sSettings、Timber、登录态……）——注入发生在它们之前。真正的工作延迟到第一次调用。
+ * - 想拿服务：能注入的地方（Hilt 入口、`@HiltViewModel`、别的 `@Inject` 类）直接注入；
+ *   拿不到注入的地方有 Context 用 [Context.appServices]。
+ * - 新增服务：`@Singleton class X @Inject constructor(...)`，Shaft 里加 `@Inject` 字段与 getter。
+ *   不要再新增 Kotlin `object` 单例来承载有状态的服务。
+ */
+interface ServicesProvider {
+    /** 通用进程内通信容器；业务在组合根创建类型化 topic，再按读写能力注入。 */
+    val communicationScope: ceui.pixiv.communication.CommunicationScope
+
+    val prefStore: MMKV
+    val networkStateManager: NetworkStateManager
+    val entityWrapper: EntityWrapper
+
+    /** 关注/收藏态的进程级内存表（原 static `Shaft.appViewModel`）。 */
+    val appLevelState: AppLevelState
+
+    /** 漫画翻译用的 OCR / 文本检测模型会话，批量与单页共用一份。 */
+    val mangaTranslateModels: MangaTranslateModels
+
+    /** 整本漫画批量翻译任务（跨 Activity 存活，所以是进程级）。 */
+    val mangaBatchTranslateCenter: MangaBatchTranslateCenter
+
+    /** FANBOX post.info 只能从 WebView 发，这个桥持有那个不上屏的 WebView，可按需释放。 */
+    val fanboxWebBridge: FanboxWebBridge
+
+    /** 批量下载持久化队列的消费循环（v33）。 */
+    val queueDownloadManager: QueueDownloadManager
+
+    /** 收藏/关注等写操作的离线队列。 */
+    val pixivActionQueue: PixivActionQueue
+
+    /** 发现页用户画像（关注/收藏/标签打分）。 */
+    val profileManager: ProfileManager
+
+    /** 发现页候选池。 */
+    val discoveryPool: DiscoveryPool
+
+    /** 账号在线/失效上报的离线信箱。 */
+    val accountOnlineReportOutbox: AccountOnlineReportOutbox
+
+    /** nana7mi 搜索埋点（批量攒发）。 */
+    val nana7miSearchTelemetry: Nana7miSearchTelemetry
+
+    /** 服务端下发的远程配置（按 uid 缓存）。 */
+    val remoteAppConfig: RemoteAppConfig
+
+    /** shaft-events 埋点上报。 */
+    val eventReporter: EventReporter
+
+    /**
+     * 聊天 WebSocket 网关。构造廉价（只存 Application），真正建连在
+     * [ShaftChatGateway.bootstrap]，由 Shaft 的延迟批在 [eventReporter] start 之后调。
+     */
+    val chatGateway: ShaftChatGateway
+
+    /**
+     * 贴纸安装（聊天与广场共用一份，与登录无关）。构造廉价，磁盘目录与两个
+     * OkHttpClient 都在首次真的要贴纸时才建。
+     */
+    val stickerRepository: StickerRepository
+
+    /** 收藏镜像引擎：限速静默地把收藏列表整份镜像到本地，支撑倒序与花式筛选。 */
+    val bookmarkMirror: BookmarkMirrorService
+
+    /** 小说阅读器可下载字体：关掉面板后下载继续，所以是进程级。 */
+    val readerFontRepository: ReaderFontRepository
+
+    /** 应用更新包下载：关掉更新 sheet 后下载继续，跑完回前台发 banner，所以是进程级。 */
+    val apkDownloadManager: ceui.lisa.update.ApkDownloadManager
+}
+
+fun Context.appServices(): ServicesProvider = applicationContext as ServicesProvider
+
+fun Fragment.requireEntityWrapper(): EntityWrapper {
+    return requireActivity().requireEntityWrapper()
+}
+
+fun FragmentActivity.requireEntityWrapper(): EntityWrapper {
+    return (application as ServicesProvider).entityWrapper
+}
+
+fun Fragment.requireNetworkStateManager(): NetworkStateManager {
+    return requireActivity().requireNetworkStateManager()
+}
+
+fun FragmentActivity.requireNetworkStateManager(): NetworkStateManager {
+    return (application as ServicesProvider).networkStateManager
+}

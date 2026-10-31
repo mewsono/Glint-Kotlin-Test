@@ -1,0 +1,676 @@
+package ceui.lisa.fragments;
+
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.net.Uri;
+import android.text.Editable;
+import android.text.TextUtils;
+import android.text.TextWatcher;
+import android.view.KeyEvent;
+import android.view.LayoutInflater;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.URLUtil;
+import android.widget.TextView;
+
+import androidx.databinding.DataBindingUtil;
+import androidx.lifecycle.Lifecycle;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.recyclerview.widget.LinearLayoutManager;
+
+import ceui.pixiv.witstudio.widget.WitTagItem;
+import ceui.pixiv.witstudio.widget.WitTagStyle;
+import ceui.pixiv.widgets.V3TagFlowView;
+import ceui.pixiv.witstudio.dialog.WitDialog;
+import ceui.pixiv.witstudio.dialog.WitDialogAction;
+import ceui.pixiv.witstudio.dialog.WitTipDialog;
+import com.bumptech.glide.Glide;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import ceui.lisa.R;
+import ceui.lisa.activities.OutWakeActivity;
+import ceui.lisa.activities.SearchActivity;
+import ceui.lisa.activities.Shaft;
+import ceui.lisa.utils.SystemBarMetrics;
+import ceui.lisa.activities.TemplateActivity;
+import ceui.lisa.activities.UActivity;
+import ceui.lisa.adapters.SearchHintAdapter;
+import ceui.lisa.database.AppDatabase;
+import ceui.lisa.database.SearchEntity;
+import ceui.lisa.databinding.FragmentSearchBinding;
+import ceui.lisa.databinding.RecyPinnedUserBinding;
+import ceui.lisa.helper.IllustNovelFilter;
+import ceui.lisa.http.LegacyApiCalls;
+import ceui.lisa.interfaces.Callback;
+import ceui.lisa.model.ListTrendingtag;
+import ceui.lisa.models.TagsBean;
+import ceui.lisa.utils.ClipBoardUtils;
+import ceui.lisa.utils.Common;
+import ceui.lisa.utils.GlideUtil;
+import ceui.lisa.utils.Params;
+import ceui.lisa.utils.PixivOperate;
+import ceui.lisa.utils.SearchTypeUtil;
+import ceui.loxia.User;
+import ceui.pixiv.services.ServiceProviderKt;
+import ceui.pixiv.ui.pinned.PinnedUsers;
+import ceui.pixiv.ui.search.SearchHintViewModel;
+import ceui.pixiv.ui.navigation.BottomSafeInsets;
+import ceui.pixiv.ui.navigation.TemplateRoute;
+
+
+public class FragmentSearch extends BaseFragment<FragmentSearchBinding> {
+
+    private SearchHintViewModel hintViewModel;
+    /** 当前这一排置顶作者。取消置顶要就地摘掉一条重绑（异步落库赶不上立刻重查 DB）。 */
+    private List<User> pinnedUsers = Collections.emptyList();
+    /** 置顶作者区是否已按 [pinnedUsers] 渲染过。用来挡掉 onResume 的无谓重绘（见 [bindPinnedUsersSection]）。 */
+    private boolean pinnedUsersBound = false;
+    /** 接口给的热门标签原样留一份：屏蔽设定一变就按新规则重滤，不必再请求一次。 */
+    private List<ListTrendingtag.TrendTagsBean> hotTagSource = Collections.emptyList();
+    private int searchType = SearchTypeUtil.defaultSearchType;
+    private boolean hasSwitchSearchType = false;
+
+    @Override
+    public void initLayout() {
+        mLayoutID = R.layout.fragment_search;
+    }
+
+    @Override
+    protected void initData() {
+        final String[] SEARCH_TYPE = SearchTypeUtil.SEARCH_TYPE_NAME;
+
+        ViewGroup.LayoutParams headParams = baseBind.head.getLayoutParams();
+        headParams.height = SystemBarMetrics.statusBarHeight(mContext);
+        baseBind.head.setLayoutParams(headParams);
+        // 内容铺到手势条下：底部在 24dp 留白之外再让出导航栏，最后一行标签不贴底。
+        BottomSafeInsets.applyTo(baseBind.scrollView);
+        hintViewModel = new ViewModelProvider(this).get(SearchHintViewModel.class);
+        setupHintObservers();
+        baseBind.inputBox.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+                String inputs = String.valueOf(charSequence);
+                baseBind.clear.setVisibility(inputs.length() > 0 ? View.VISIBLE : View.INVISIBLE);
+
+                boolean shouldAutocomplete = inputs.length() > 0 && !inputs.endsWith(" ")
+                        && (searchType == 0 || (searchType == 5 && !Common.isNumeric(inputs)));
+                if (shouldAutocomplete) {
+                    List<String> keys = Arrays.stream(inputs.split(" "))
+                            .filter(s -> !TextUtils.isEmpty(s)).collect(Collectors.toList());
+                    if (keys.size() > 0) {
+                        hintViewModel.onTextChanged(keys.get(keys.size() - 1));
+                    }
+                } else {
+                    hintViewModel.clearHints();
+                }
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+
+            }
+        });
+        baseBind.inputBox.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override
+            public boolean onEditorAction(TextView textView, int i, KeyEvent keyEvent) {
+                if (!TextUtils.isEmpty(baseBind.inputBox.getText().toString())) {
+                    Common.hideKeyboard(mActivity);
+                    dispatchClick(baseBind.inputBox.getText().toString(), searchType);
+                    return true;
+                } else {
+                    Common.showToast(getString(R.string.string_148));
+                }
+                return false;
+            }
+        });
+        baseBind.inputBox.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                hintViewModel.showHintsIfAvailable();
+            }
+        });
+        baseBind.clear.setOnClickListener(view -> baseBind.inputBox.setText(""));
+        baseBind.inputBox.setOnTouchListener((view, motionEvent) -> {
+            hintViewModel.showHintsIfAvailable();
+            return false;
+        });
+        baseBind.container.setOnClickListener(view -> hintViewModel.hideHints());
+        baseBind.more.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                popUpSearchTypeSwitcher();
+            }
+        });
+        baseBind.inputBox.setHint(SEARCH_TYPE[searchType]);
+        getHotTags();
+    }
+
+    private void dispatchClick(String keyWord, int searchType) {
+        String trimmedKeyword = keyWord.trim();
+        if (searchType == 0) {
+            hintViewModel.hideHints();
+            //PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD);
+            Intent intent = new Intent(mContext, SearchActivity.class);
+            intent.putExtra(Params.KEY_WORD, trimmedKeyword);
+            intent.putExtra(Params.INDEX, 0);
+            startActivity(intent);
+        } else if (searchType == 1) {
+            if (Common.isNumeric(trimmedKeyword)) {
+                PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_ILLUSTSID);
+                PixivOperate.getIllustByID(tryParseId(trimmedKeyword), mContext);
+            } else {
+                Common.showToast(getString(R.string.string_154));
+            }
+        }  else if (searchType == 2) {
+            if (Common.isNumeric(trimmedKeyword)) {
+                PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_USERID);
+                Intent intent = new Intent(mContext, UActivity.class);
+                intent.putExtra(Params.USER_ID, (long) Common.safeUserId(trimmedKeyword));
+                startActivity(intent);
+            } else {
+                Common.showToast(getString(R.string.string_154));
+            }
+        } else if (searchType == 3) {
+            if (Common.isNumeric(trimmedKeyword)) {
+                PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_NOVELID);
+                PixivOperate.getNovelByID(tryParseId(trimmedKeyword), mContext, null);
+            } else {
+                Common.showToast(getString(R.string.string_154));
+            }
+        } else if (searchType == 4) {
+            if (!TextUtils.isEmpty(trimmedKeyword) && URLUtil.isValidUrl(trimmedKeyword)) {
+                try {
+                    PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_URL);
+                    Intent intent = new Intent(mContext, OutWakeActivity.class);
+                    intent.setData(Uri.parse(trimmedKeyword));
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Common.showToast(e.toString());
+                    e.printStackTrace();
+                }
+            } else {
+                Common.showToast(getString(R.string.string_408));
+            }
+        } else if (searchType == 5) {
+            if (URLUtil.isValidUrl(trimmedKeyword)) {
+                try {
+                    PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_URL);
+                    Intent intent = new Intent(mContext, OutWakeActivity.class);
+                    intent.setData(Uri.parse(trimmedKeyword));
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Common.showToast(e.toString());
+                    e.printStackTrace();
+                }
+            }
+            else if(Common.isNumeric(trimmedKeyword)){
+                WitTipDialog tipDialog = new WitTipDialog.Builder(mContext)
+                        .setTipWord(getString(R.string.string_429))
+                        .create();
+                tipDialog.show();
+                // 绑定发起请求时的视图，避免旧请求在视图重建后继续跳转。
+                Lifecycle requestLifecycle = getViewLifecycleOwner().getLifecycle();
+                //先假定为作品id
+                PixivOperate.getIllustByID(tryParseId(trimmedKeyword), mContext, new Callback<Void>() {
+                    @Override
+                    public void doSomething(Void t) {
+                        PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_ILLUSTSID);
+                        tipDialog.dismiss();
+                    }
+                }, new Callback<Void>() {
+                    @Override
+                    public void doSomething(Void t) {
+                        tipDialog.dismiss();
+                        if (!isAdded() || requestLifecycle.getCurrentState() == Lifecycle.State.DESTROYED
+                                || mActivity.isFinishing() || mActivity.isDestroyed()) {
+                            return;
+                        }
+                        PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_USERID);
+                        Intent intent = new Intent(mContext, UActivity.class);
+                        intent.putExtra(Params.USER_ID, (long) Common.safeUserId(trimmedKeyword));
+                        startActivity(intent);
+                    }
+                });
+            }
+            else{
+                hintViewModel.hideHints();
+                //PixivOperate.insertSearchHistory(trimmedKeyword, SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD);
+                Intent intent = new Intent(mContext, SearchActivity.class);
+                intent.putExtra(Params.KEY_WORD, trimmedKeyword);
+                intent.putExtra(Params.INDEX, 0);
+                startActivity(intent);
+            }
+        }
+    }
+
+    private void setupHintObservers() {
+        baseBind.hintList.setLayoutManager(new LinearLayoutManager(mContext));
+        hintViewModel.getHints().observe(getViewLifecycleOwner(), hints -> {
+            if (hints == null || hints.isEmpty()) return;
+            String keyword = hintViewModel.getCurrentKeyword().getValue();
+            SearchHintAdapter adapter = new SearchHintAdapter(hints, mContext, keyword != null ? keyword : "");
+            adapter.setOnItemClickListener((v, position, viewType) -> {
+                hintViewModel.hideHints();
+                String tag = hints.get(position).getTag();
+                Intent intent = new Intent(mContext, SearchActivity.class);
+                intent.putExtra(Params.KEY_WORD, tag);
+                intent.putExtra(Params.INDEX, 0);
+                startActivity(intent);
+            });
+            adapter.setOnItemLongClickListener((v, position, viewType) -> {
+                hintViewModel.hideHints();
+                String currentInput = baseBind.inputBox.getText().toString();
+                List<String> keys = Arrays.stream(currentInput.split(" "))
+                        .filter(s -> !TextUtils.isEmpty(s)).collect(Collectors.toList());
+                String tagName = hints.get(position).getTag();
+                StringBuilder sb = new StringBuilder();
+                if (keys.size() > 0) {
+                    keys.set(keys.size() - 1, tagName);
+                    sb.append(TextUtils.join(" ", keys));
+                } else {
+                    sb.append(tagName);
+                }
+                baseBind.inputBox.setText(sb.append(" ").toString());
+                baseBind.inputBox.setSelection(baseBind.inputBox.getText().length());
+            });
+            baseBind.hintList.setAdapter(adapter);
+        });
+        hintViewModel.getHintsVisible().observe(getViewLifecycleOwner(), visible -> {
+            animateHintList(visible != null && visible);
+        });
+    }
+
+    private void animateHintList(boolean show) {
+        if (show) {
+            if (baseBind.hintList.getVisibility() == View.VISIBLE) return;
+            baseBind.hintList.setAlpha(0f);
+            baseBind.hintList.setTranslationY(-24f);
+            baseBind.hintList.setVisibility(View.VISIBLE);
+            baseBind.hintList.animate()
+                    .alpha(1f)
+                    .translationY(0f)
+                    .setDuration(220)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+        } else {
+            if (baseBind.hintList.getVisibility() != View.VISIBLE) return;
+            baseBind.hintList.animate()
+                    .alpha(0f)
+                    .translationY(-16f)
+                    .setDuration(160)
+                    .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                    .withEndAction(() -> {
+                        baseBind.hintList.setVisibility(View.GONE);
+                        baseBind.hintList.setTranslationY(0f);
+                    })
+                    .start();
+        }
+    }
+
+    private void getHotTags() {
+        baseBind.hotTags.setOnTagActionsChanged(this::onTagActionsChanged);
+        baseBind.hotTags.setOnAppendToSearch(this::appendTagToInput);
+        baseBind.hotTags.setOnItemClickListener((item, position) -> {
+            hintViewModel.hideHints();
+            Intent intent = new Intent(mContext, SearchActivity.class);
+            intent.putExtra(Params.KEY_WORD, item.getName());
+            intent.putExtra(Params.INDEX, 0);
+            startActivity(intent);
+        });
+        LegacyApiCalls.getHotTags(this, Params.TYPE_ILLUST, response -> {
+            List<ListTrendingtag.TrendTagsBean> tags = response.getList();
+            hotTagSource = tags != null ? tags : Collections.emptyList();
+            bindHotTags();
+        });
+    }
+
+    /**
+     * 热门标签行：滤掉已屏蔽的标签（pixez#1182）后取前 15 个。先滤后截，屏蔽掉几个也仍然摆满一行。
+     * 屏蔽规则可能在别处被改（设置页、作品详情、本页长按），所以 onResume 与标签菜单操作后都重滤一遍。
+     */
+    private void bindHotTags() {
+        if (hotTagSource.isEmpty()) {
+            return;
+        }
+        List<TagsBean> mutedTags = IllustNovelFilter.getMutedTags();
+        List<WitTagItem> items = new ArrayList<>();
+        for (ListTrendingtag.TrendTagsBean tag : hotTagSource) {
+            if (items.size() >= 15) {
+                break;
+            }
+            if (IllustNovelFilter.isTagNameMuted(tag.getTag(), mutedTags)) {
+                continue;
+            }
+            items.add(new WitTagItem(tag.getTag(), tag.getTag(), tag.getTranslated_name()));
+        }
+        baseBind.hotTags.setItems(items);
+    }
+
+    /**
+     * 标签长按「添加到搜索词」（#1183）：拼到输入框末尾、空格分隔，已经在里面的不重复加。
+     * 历史里的多标签搜索整条存成一个词（如「A B」），按词逐个比对，避免拼出「A A B」。
+     * ID / URL 这类搜索方式拼标签没有意义：切回标签搜索，并丢掉框里原有的 ID / 链接
+     * （剪贴板预测会把链接自动填进来），否则会拼成「链接 标签」搜出一片空。
+     */
+    private kotlin.Unit appendTagToInput(String tag) {
+        List<String> keys = new ArrayList<>();
+        if (searchType != SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD && searchType != SearchTypeUtil.defaultSearchType) {
+            searchType = SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD;
+            baseBind.inputBox.setHint(SearchTypeUtil.SEARCH_TYPE_NAME[searchType]);
+        } else {
+            Arrays.stream(baseBind.inputBox.getText().toString().split(" "))
+                    .filter(s -> !TextUtils.isEmpty(s)).forEach(keys::add);
+        }
+        for (String key : tag.split(" ")) {
+            if (!TextUtils.isEmpty(key) && !keys.contains(key)) {
+                keys.add(key);
+            }
+        }
+        baseBind.inputBox.setText(TextUtils.join(" ", keys) + " ");
+        baseBind.inputBox.setSelection(baseBind.inputBox.getText().length());
+        return kotlin.Unit.INSTANCE;
+    }
+
+    /** 本页任一标签行里固定 / 屏蔽了标签：历史行的固定区与热门标签行都要跟着变。 */
+    private void onTagActionsChanged() {
+        loadHistory();
+        bindHotTags();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        loadHistory();
+        bindHotTags();
+        predictSearchType();
+    }
+
+    /**
+     * Load the search history
+     * */
+    private void loadHistory() {
+        // 固定标签全量取，最近搜索另取上限；不能把两者塞进同一个 LIMIT，否则
+        // 固定数量超出上限时会被静默挤掉（issue #524）
+        List<SearchEntity> pinned = AppDatabase.getAppDatabase(Shaft.getContext()).searchDao().getAllPinned();
+        List<SearchEntity> recent = AppDatabase.getAppDatabase(Shaft.getContext()).searchDao().getRecentUnpinned(50);
+        bindPinnedUsersSection(PinnedUsers.loadForSearchRow(Shaft.getContext()));
+        bindPinnedSection(pinned);
+        bindHistorySection(recent);
+    }
+
+    /**
+     * 置顶作者单独一段，摆在置顶标签上面。刻意不和置顶标签共用一排：作者挤占标签的格子
+     * 正是这个功能要解决的问题（用户只能「搜作者名 → 置顶那条搜索」）。
+     */
+    private void bindPinnedUsersSection(final List<User> users) {
+        // 详情页作者栏已有先例：同一份数据重绑，头像不该重走一次解码 / 淡入
+        // （见 binding_loadUserIcon 的「同一 URL 直接 return」短路）。这里挡得更靠前：
+        // 从二级搜索页返回都会重跑 loadHistory，置顶作者没变时连格子都不重建 —— 否则
+        // setItemViewFactory 会清掉渲染签名，把每条头像重新 inflate 再 Glide 淡入一次，
+        // 那就是返回时看到的那下闪烁。
+        if (pinnedUsersBound && users.equals(pinnedUsers)) {
+            return;
+        }
+        pinnedUsersBound = true;
+        pinnedUsers = users;
+        if (users.isEmpty()) {
+            baseBind.pinnedUsersSection.setVisibility(View.GONE);
+            return;
+        }
+        baseBind.pinnedUsersSection.setVisibility(View.VISIBLE);
+        baseBind.pinnedUsersFlow.setShowHashPrefix(false);
+        baseBind.pinnedUsersFlow.setItemViewFactory((parent, item, position, palette) -> {
+            User user = users.get(position);
+            RecyPinnedUserBinding binding = DataBindingUtil.inflate(
+                    LayoutInflater.from(mContext), R.layout.recy_pinned_user, parent, false);
+            binding.userName.setText(user.getName());
+            WitTagStyle.applyText(binding.userName, palette);
+            Glide.with(binding.userAvatar).load(GlideUtil.getHead(user)).into(binding.userAvatar);
+            return binding.getRoot();
+        });
+        List<WitTagItem> items = new ArrayList<>();
+        for (User user : users) items.add(new WitTagItem(String.valueOf(user.getId()), user.getName()));
+        baseBind.pinnedUsersFlow.setItems(items);
+        baseBind.pinnedUsersFlow.setOnItemClickListener((item, position) -> {
+            // 走 UActivity 而不是直接开 V3：新旧作者页的路由分发在 UActivity 里，
+            // 这里硬指一个就会绕开用户的「使用新版作品页」开关。
+            Intent intent = new Intent(mContext, UActivity.class);
+            intent.putExtra(Params.USER_ID, users.get(position).getId());
+            startActivity(intent);
+        });
+        baseBind.pinnedUsersFlow.setOnItemLongClickListener((item, position) ->
+                showUnpinUserDialog(users.get(position)));
+    }
+
+    private boolean showUnpinUserDialog(final User user) {
+        new WitDialog.MessageDialogBuilder(mContext)
+                .setTitle(R.string.string_143)
+                .setMessage(getString(R.string.unpin_user_confirm_message, user.getName()))
+                .addAction(getString(R.string.string_142), (dialog, index) -> dialog.dismiss())
+                .addAction(0, getString(R.string.unpin_user), WitDialogAction.ACTION_PROP_NEGATIVE, (dialog, index) -> {
+                    ServiceProviderKt.requireEntityWrapper(mActivity).unpinUser(Shaft.getContext(), user.getId());
+                    Common.showToast(getString(R.string.unpin_user_success));
+                    dialog.dismiss();
+                    // unpinUser 是 IO 线程异步落库,这里立刻重查 DB 会读到旧行 ——
+                    // 直接把这一条从当前列表里摘掉重绑,不等 DB。
+                    List<User> rest = new ArrayList<>(pinnedUsers);
+                    rest.remove(user);
+                    bindPinnedUsersSection(rest);
+                })
+                .show();
+        return true;
+    }
+
+    private void bindPinnedSection(final List<SearchEntity> pinned) {
+        if (pinned.isEmpty()) {
+            baseBind.pinnedSection.setVisibility(View.GONE);
+            return;
+        }
+        baseBind.pinnedSection.setVisibility(View.VISIBLE);
+        bindHistoryFlow(baseBind.pinnedTagsFlow, pinned);
+        baseBind.clearPinned.setOnClickListener(v -> new WitDialog.MessageDialogBuilder(getActivity())
+                .setTitle(getString(R.string.string_143))
+                .setMessage(getString(R.string.clear_pinned_tags_msg))
+                .addAction(getString(R.string.string_142), (dialog, index) -> dialog.dismiss())
+                .addAction(0, getString(R.string.string_141), WitDialogAction.ACTION_PROP_NEGATIVE, (dialog, index) -> {
+                    AppDatabase.getAppDatabase(Shaft.getContext()).searchDao().deleteAllPinned();
+                    Common.showToast(getString(R.string.pinned_tags_cleared));
+                    dialog.dismiss();
+                    onResume();
+                })
+                .show());
+        baseBind.viewAllPinned.setOnClickListener(v -> {
+            Intent intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.PINNED_CONTENT.key);
+            startActivity(intent);
+        });
+    }
+
+    private void bindHistorySection(final List<SearchEntity> history) {
+        if (history.isEmpty()) {
+            baseBind.historySection.setVisibility(View.GONE);
+            return;
+        }
+        baseBind.historySection.setVisibility(View.VISIBLE);
+        bindHistoryFlow(baseBind.searchHistory, history);
+        baseBind.clearHistory.setOnClickListener(v -> new WitDialog.MessageDialogBuilder(getActivity())
+                .setTitle(getString(R.string.string_143))
+                .setMessage(getString(R.string.string_144))
+                .addAction(getString(R.string.string_142), (dialog, index) -> dialog.dismiss())
+                .addAction(0, getString(R.string.string_141), WitDialogAction.ACTION_PROP_NEGATIVE, (dialog, index) -> {
+                    AppDatabase.getAppDatabase(Shaft.getContext()).searchDao().deleteAllUnpinned();
+                    Common.showToast(getString(R.string.string_140));
+                    dialog.dismiss();
+                    onResume();
+                })
+                .show());
+    }
+
+    private void bindHistoryFlow(V3TagFlowView flow, final List<SearchEntity> data) {
+        flow.setShowHashPrefix(false);
+        flow.setShowTranslation(false);
+        flow.setOnTagActionsChanged(this::onTagActionsChanged);
+        flow.setOnAppendToSearch(this::appendTagToInput);
+        List<WitTagItem> items = new ArrayList<>();
+        for (SearchEntity entity : data) {
+            items.add(new WitTagItem(String.valueOf(entity.getId()), entity.getKeyword(),
+                    null, entity.isPinned() ? R.drawable.ic_fix_black_24dp : 0,
+                    entity.isPinned() ? null : getString(R.string.action_delete) + " " + entity.getKeyword()));
+        }
+        flow.setItems(items);
+        flow.setOnItemClickListener((item, position) -> handleHistoryClick(data.get(position)));
+        flow.setOnItemLongClickListener((item, position) -> {
+            SearchEntity entity = data.get(position);
+            if (entity.getSearchType() == SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD) {
+                flow.showTagActionMenu(item.getName(), item.getTranslation());
+                return true;
+            }
+            // ID、URL、作者名仍按原搜索类型处理，不能变成 Pixiv 标签的屏蔽/翻译入口。
+            return showHistoryActionDialog(entity);
+        });
+        flow.setOnItemRemoveListener((item, position) -> confirmDeleteHistory(data.get(position)));
+    }
+
+    private void confirmDeleteHistory(SearchEntity entity) {
+        new WitDialog.MessageDialogBuilder(mContext)
+                .setTitle(R.string.action_delete)
+                .setMessage(getString(R.string.search_history_delete_confirm, entity.getKeyword()))
+                .addAction(R.string.string_142, (dialog, which) -> dialog.dismiss())
+                .addAction(0, R.string.action_delete, WitDialogAction.ACTION_PROP_NEGATIVE, (dialog, which) -> {
+                    dialog.dismiss();
+                    AppDatabase.getAppDatabase(mContext).searchDao().deleteSearchEntity(entity);
+                    Common.showToast(R.string.operate_success);
+                    if (getView() != null) loadHistory();
+                })
+                .show();
+    }
+
+    private void handleHistoryClick(SearchEntity entity) {
+        int type = entity.getSearchType();
+        if (type == SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD) {
+            hintViewModel.hideHints();
+            Intent intent = new Intent(mContext, SearchActivity.class);
+            intent.putExtra(Params.KEY_WORD, entity.getKeyword());
+            intent.putExtra(Params.INDEX, 0);
+            startActivity(intent);
+        } else if (type == SearchTypeUtil.SEARCH_TYPE_DB_ILLUSTSID) {
+            entity.setSearchTime(System.currentTimeMillis());
+            AppDatabase.getAppDatabase(mContext).searchDao().insert(entity);
+            PixivOperate.getIllustByID(tryParseId(entity.getKeyword()), mContext);
+        } else if (type == SearchTypeUtil.SEARCH_TYPE_DB_USERKEYWORD) {
+            hintViewModel.hideHints();
+            Intent intent = new Intent(mContext, SearchActivity.class);
+            intent.putExtra(Params.KEY_WORD, entity.getKeyword());
+            intent.putExtra(Params.INDEX, 0);
+            startActivity(intent);
+        } else if (type == SearchTypeUtil.SEARCH_TYPE_DB_USERID) {
+            entity.setSearchTime(System.currentTimeMillis());
+            AppDatabase.getAppDatabase(mContext).searchDao().insert(entity);
+            Intent intent = new Intent(mContext, UActivity.class);
+            intent.putExtra(Params.USER_ID, (long) Common.safeUserId(entity.getKeyword()));
+            startActivity(intent);
+        } else if (type == SearchTypeUtil.SEARCH_TYPE_DB_NOVELID) {
+            entity.setSearchTime(System.currentTimeMillis());
+            AppDatabase.getAppDatabase(mContext).searchDao().insert(entity);
+            PixivOperate.getNovelByID(tryParseId(entity.getKeyword()), mContext, null);
+        } else if (type == SearchTypeUtil.SEARCH_TYPE_DB_URL) {
+            entity.setSearchTime(System.currentTimeMillis());
+            AppDatabase.getAppDatabase(mContext).searchDao().insert(entity);
+            Intent intent = new Intent(mContext, OutWakeActivity.class);
+            intent.setData(Uri.parse(entity.getKeyword()));
+            startActivity(intent);
+        }
+    }
+
+    private boolean showHistoryActionDialog(final SearchEntity searchEntity) {
+        new WitDialog.MessageDialogBuilder(mContext)
+                .setTitle(R.string.string_87)
+                .setMessage(searchEntity.getKeyword())
+                .addAction(getString(R.string.string_142), (dialog, index) -> dialog.dismiss())
+                .addAction(searchEntity.isPinned() ? getString(R.string.string_443) : getString(R.string.string_442), (dialog, index) -> {
+                    searchEntity.setPinned(!searchEntity.isPinned());
+                    AppDatabase.getAppDatabase(mContext).searchDao().insert(searchEntity);
+                    dialog.dismiss();
+                    // 切换 pinned 后该条目需要在两个 section 间挪动,简单粗暴重新加载两段
+                    loadHistory();
+                })
+                .addAction(getString(R.string.string_120), (dialog, index) -> {
+                    Common.copy(mContext, searchEntity.getKeyword());
+                    dialog.dismiss();
+                })
+                .show();
+        return true;
+    }
+
+    private void predictSearchType(){
+        // 当前搜索过程，手动切换后 或 输入框里有值时，不再根据剪贴板内容预测
+        if(hasSwitchSearchType){
+            return;
+        }
+        if(!TextUtils.isEmpty(baseBind.inputBox.getText().toString())){
+            return;
+        }
+        mActivity.getWindow().getDecorView().post(new Runnable() {
+            @Override
+            public void run() {
+                String content = ClipBoardUtils.getClipboardContent(mContext);
+                String previousClipboardValue = Shaft.getMMKV().getString(Params.FRAGMENT_SEARCH_CLIPBOARD_VALUE, "");
+                // 如果之前确认过的剪贴板值和本次相同，不进行预测
+                if (!TextUtils.isEmpty(previousClipboardValue) && previousClipboardValue.equals(content)) {
+                    return;
+                }
+                int suggestSearchType = SearchTypeUtil.getSuggestSearchType(content);
+                // 预测类型和现在不同，进行切换并提示确认
+                if (suggestSearchType != searchType) {
+                    searchType = suggestSearchType;
+                    baseBind.inputBox.setHint(SearchTypeUtil.SEARCH_TYPE_NAME[searchType]);
+                    popUpSearchTypeSwitcher(true, content);
+                }
+            }
+        });
+    }
+
+    private void popUpSearchTypeSwitcher(){
+        popUpSearchTypeSwitcher(false, null);
+    }
+
+    private void popUpSearchTypeSwitcher(boolean fromClipboard, String clipboardContent) {
+        final String[] SEARCH_TYPE = SearchTypeUtil.SEARCH_TYPE_NAME;
+        new WitDialog.CheckableDialogBuilder(mContext)
+                .setTitle(fromClipboard ? R.string.string_425 : R.string.string_424)
+                .setCheckedIndex(searchType)
+                .addItems(SEARCH_TYPE, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        if (searchType != which) {
+                            searchType = which;
+                            baseBind.inputBox.setHint(SEARCH_TYPE[which]);
+                        }
+                        // 只要选中过任何选项，就不再进行相同内容的剪贴板预测
+                        if (fromClipboard) {
+                            Shaft.getMMKV().putString(Params.FRAGMENT_SEARCH_CLIPBOARD_VALUE, clipboardContent);
+                        }
+                        // 对非标签搜索且非综合搜索的，进行填充
+                        if (fromClipboard && (searchType != SearchTypeUtil.SEARCH_TYPE_DB_KEYWORD && searchType != SearchTypeUtil.defaultSearchType)) {
+                            baseBind.inputBox.setText(clipboardContent);
+                        }
+                        dialog.dismiss();
+                    }
+                })
+                .create()
+                .show();
+        // 开启一次即不再开启
+        if (fromClipboard) {
+            hasSwitchSearchType = true;
+        }
+    }
+}

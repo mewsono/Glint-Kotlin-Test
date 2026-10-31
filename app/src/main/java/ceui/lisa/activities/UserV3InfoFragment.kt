@@ -1,0 +1,523 @@
+package ceui.lisa.activities
+
+import android.os.Bundle
+import android.text.TextUtils
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import androidx.core.view.OneShotPreDrawListener
+import androidx.core.view.doOnPreDraw
+import androidx.core.view.isVisible
+import androidx.core.view.doOnPreDraw
+import androidx.databinding.DataBindingUtil
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
+import ceui.lisa.R
+import ceui.lisa.databinding.FragmentUserV3InfoBinding
+import ceui.lisa.databinding.ItemV3ProfileChipBinding
+import ceui.lisa.models.UserDetailResponse
+import ceui.lisa.models.WorkspaceBean
+import ceui.lisa.utils.PixivOperate
+import ceui.lisa.viewmodel.UserViewModel
+import ceui.pixiv.utils.Event
+import ceui.pixiv.api.model.WebUserDetail
+import ceui.pixiv.ui.comments.translateComment
+import ceui.pixiv.session.SessionManager
+
+/** 作者简介折叠阈值，与 V3 详情页简介一致。 */
+private const val BIO_COLLAPSED_LINES = 5
+
+/**
+ * V3 用户主页右侧 Tab —— 资料 / 工作环境 / 社交链接 / 简介 / 屏蔽。
+ *
+ * 共享宿主 UserActivityV3 的 UserViewModel,自身只负责把数据渲染进卡片。
+ */
+class UserV3InfoFragment : Fragment() {
+
+    private var _binding: FragmentUserV3InfoBinding? = null
+    private val binding get() = _binding!!
+    private val userViewModel: UserViewModel by activityViewModels()
+
+    /** 作者简介展开态（对齐 V3 详情页简介折叠）。 */
+    private var bioExpanded = false
+    private var bioFullText: CharSequence? = null
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?,
+    ): View {
+        _binding = DataBindingUtil.inflate(
+            inflater, R.layout.fragment_user_v3_info, container, false
+        )
+        return binding.root
+    }
+
+    private val muteSwitchListener =
+        android.widget.CompoundButton.OnCheckedChangeListener { _, isChecked ->
+            val user = userViewModel.user.value?.user ?: return@OnCheckedChangeListener
+            if (isChecked) {
+                PixivOperate.muteUser(user)
+                userViewModel.isUserMuted.value = true
+            } else {
+                PixivOperate.unMuteUser(user)
+                userViewModel.isUserMuted.value = false
+            }
+            userViewModel.refreshEvent.value = Event(100, 0L)
+        }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        userViewModel.user.observe(viewLifecycleOwner) { data ->
+            if (data != null) bindUserDetail(data)
+        }
+        userViewModel.webUserDetail.observe(viewLifecycleOwner) { detail ->
+            if (detail != null) bindWebUserDetail(detail)
+        }
+        // 宿主菜单里也能改 mute,这里同步 switch 状态,临时摘掉 listener 避免回调里再写回 LiveData 导致循环。
+        userViewModel.isUserMuted.observe(viewLifecycleOwner) { isMuted ->
+            val checked = isMuted == true
+            if (binding.muteSwitch.isChecked != checked) {
+                binding.muteSwitch.setOnCheckedChangeListener(null)
+                binding.muteSwitch.isChecked = checked
+                binding.muteSwitch.setOnCheckedChangeListener(muteSwitchListener)
+            }
+        }
+        binding.bioTranslate.setOnClickListener { translateBio() }
+        binding.bioToggle.setOnClickListener {
+            bioExpanded = !bioExpanded
+            applyBioCollapseState()
+        }
+    }
+
+    override fun onDestroyView() {
+        clearPendingBioPreDraw()
+        bioFullText = null
+        super.onDestroyView()
+        _binding = null
+    }
+
+    private fun bindBio(full: CharSequence) {
+        bioFullText = full
+        binding.bioSection.isVisible = true
+        binding.bio.text = full
+        binding.bio.movementMethod = android.text.method.LinkMovementMethod.getInstance()
+        applyBioCollapseState()
+    }
+
+    private fun translateBio() {
+        val plain = (bioFullText ?: binding.bio.text).toString().trim()
+        translateComment(plain)
+    }
+
+    /**
+     * 长简介折叠，对齐 V3 详情页简介区：#965/#1005 同款实现口径。
+     * 折叠态在文本层面截到第 [BIO_COLLAPSED_LINES] 行止，避免 textIsSelectable /
+     * LinkMovementMethod 把隐藏行滚出来。
+     */
+    private fun applyBioCollapseState() {
+        val full = bioFullText ?: return
+        binding.bio.maxLines = if (bioExpanded) Int.MAX_VALUE else BIO_COLLAPSED_LINES
+        binding.bio.text = full
+        binding.bio.scrollTo(0, 0)
+        binding.bioToggle.setText(
+            if (bioExpanded) R.string.v3_desc_collapse else R.string.v3_desc_expand
+        )
+        clearPendingBioPreDraw()
+        lateinit var request: OneShotPreDrawListener
+        request = binding.bio.doOnPreDraw {
+            if (binding.bio.getTag(R.id.v3_desc_predraw_listener) === request &&
+                bioFullText === full
+            ) {
+                binding.bio.setTag(R.id.v3_desc_predraw_listener, null)
+                val layout = binding.bio.layout
+                if (layout != null) {
+                    val overflow = layout.lineCount > BIO_COLLAPSED_LINES
+                    binding.bioToggle.isVisible = overflow
+                    if (!bioExpanded && overflow) {
+                        val end = layout.getLineEnd(BIO_COLLAPSED_LINES - 1).coerceIn(0, full.length)
+                        binding.bio.text = full.subSequence(0, end).trimEnd()
+                    }
+                }
+            }
+        }
+        binding.bio.setTag(R.id.v3_desc_predraw_listener, request)
+    }
+
+    private fun clearPendingBioPreDraw() {
+        (binding.bio.getTag(R.id.v3_desc_predraw_listener) as? OneShotPreDrawListener)
+            ?.removeListener()
+        binding.bio.setTag(R.id.v3_desc_predraw_listener, null)
+    }
+
+    private fun bindUserDetail(data: UserDetailResponse) {
+        val user = data.user
+        val profile = data.profile
+        val isSelf = user.id == SessionManager.loggedInUid
+
+        // Bio
+        if (!TextUtils.isEmpty(user.comment)) {
+            bindBio(
+                androidx.core.text.HtmlCompat.fromHtml(
+                    user.comment.orEmpty(), androidx.core.text.HtmlCompat.FROM_HTML_MODE_COMPACT
+                )
+            )
+        }
+
+        // Social chips from app API (web API may add more later)
+        setupSocialChips(profile)
+
+        setupProfileCard(data)
+        setupWorkspaceCard(data.workspace)
+
+        if (!isSelf) {
+            binding.muteStrip.visibility = View.VISIBLE
+            val isMuted = userViewModel.isUserMuted.value == true
+            // 摘 listener → 设值 → 重新挂,避免初始 isChecked 写入触发 muteSwitchListener。
+            binding.muteSwitch.setOnCheckedChangeListener(null)
+            binding.muteSwitch.isChecked = isMuted
+            binding.muteSwitch.setOnCheckedChangeListener(muteSwitchListener)
+        }
+    }
+
+    private fun bindWebUserDetail(detail: WebUserDetail) {
+        // Web 端的 commentHtml 比 app 端的 user.comment 排版更全（有 <a> 等标签）,有就覆盖。
+        if (!detail.commentHtml.isNullOrEmpty()) {
+            bindBio(
+                androidx.core.text.HtmlCompat.fromHtml(
+                    detail.commentHtml, androidx.core.text.HtmlCompat.FROM_HTML_MODE_COMPACT
+                )
+            )
+        }
+
+        // Supplement social links from Web API
+        detail.social?.forEach { (platform, link) ->
+            val url = link.url ?: return@forEach
+            addSocialChip(platform, prettySocialLabel(platform), url)
+        }
+        detail.webpage?.takeIf { it.isNotBlank() }?.let { url ->
+            addSocialChip("webpage", "Website", url)
+        }
+    }
+
+    private data class SocialStyle(val iconRes: Int, val badgeColor: Int)
+
+    private fun socialStyle(platformKey: String): SocialStyle {
+        return when (platformKey.lowercase()) {
+            "instagram" -> SocialStyle(R.drawable.ic_v3_social_instagram, 0xFFFFE7FC.toInt())
+            "facebook" -> SocialStyle(R.drawable.ic_v3_social_facebook, 0xFFDBF2FE.toInt())
+            "twitter", "x" -> SocialStyle(R.drawable.ic_v3_social_twitter, 0xFFDFDFDF.toInt())
+            "youtube" -> SocialStyle(R.drawable.ic_v3_social_youtube, 0xFFFFD6CD.toInt())
+            "tiktok" -> SocialStyle(R.drawable.ic_v3_social_tiktok, 0xFFDFDFDF.toInt())
+            "linkedin" -> SocialStyle(R.drawable.ic_v3_social_linkedin, 0xFFE0EFFF.toInt())
+            "spotify" -> SocialStyle(R.drawable.ic_v3_social_spotify, 0xFFD5EDC2.toInt())
+            else -> SocialStyle(R.drawable.ic_v3_social_link, 0xFFE8DCCD.toInt())
+        }
+    }
+
+    private fun prettySocialLabel(platformKey: String): String {
+        return when (platformKey.lowercase()) {
+            "twitter", "x" -> "X (Twitter)"
+            "youtube" -> "YouTube"
+            "tiktok" -> "TikTok"
+            "linkedin" -> "LinkedIn"
+            "github" -> "GitHub"
+            "webpage" -> "Website"
+            else -> platformKey.replaceFirstChar { it.uppercase() }
+        }
+    }
+
+    private fun setupSocialChips(profile: ceui.lisa.models.ProfileBean) {
+        addSocialChip(
+            "twitter",
+            if (!TextUtils.isEmpty(profile.twitter_account)) "@${profile.twitter_account}" else "X (Twitter)",
+            profile.twitter_url
+        )
+        addSocialChip("webpage", "Website", profile.webpage)
+        addSocialChip("pawoo", "Pawoo", profile.pawoo_url)
+    }
+
+    private fun addSocialChip(platformKey: String, label: String, url: String?) {
+        if (url.isNullOrEmpty()) return
+        val dedupTag = "${platformKey.lowercase()}:${url}"
+        for (i in 0 until binding.socialsGroup.childCount) {
+            if (binding.socialsGroup.getChildAt(i).tag == dedupTag) return
+        }
+
+        val ctx = requireContext()
+        val dp = resources.displayMetrics.density
+        val style = socialStyle(platformKey)
+
+        if (binding.socialsGroup.childCount > 0) {
+            val divider = View(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    Math.max(1, (0.5f * dp).toInt())
+                )
+                setBackgroundColor(resources.getColor(R.color.v3_border_2, ctx.theme))
+            }
+            binding.socialsGroup.addView(divider)
+        }
+
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            tag = dedupTag
+            val typed = android.util.TypedValue()
+            ctx.theme.resolveAttribute(android.R.attr.selectableItemBackground, typed, true)
+            setBackgroundResource(typed.resourceId)
+            setPadding(0, (12 * dp).toInt(), 0, (12 * dp).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener { openUrl(url) }
+        }
+
+        val badge = android.widget.ImageView(ctx).apply {
+            setImageResource(style.iconRes)
+            scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 10f * dp
+                setColor(style.badgeColor)
+            }
+            val pad = (8 * dp).toInt()
+            setPadding(pad, pad, pad, pad)
+            layoutParams = LinearLayout.LayoutParams(
+                (36 * dp).toInt(), (36 * dp).toInt()
+            )
+        }
+        row.addView(badge)
+
+        val tv = android.widget.TextView(ctx).apply {
+            text = label
+            setTextColor(resources.getColor(R.color.v3_text_1, ctx.theme))
+            textSize = 14f
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            maxLines = 1
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply {
+                marginStart = (12 * dp).toInt()
+                marginEnd = (12 * dp).toInt()
+            }
+        }
+        row.addView(tv)
+
+        val chevron = android.widget.ImageView(ctx).apply {
+            setImageResource(R.drawable.ic_arrow_right_little)
+            imageTintList = android.content.res.ColorStateList.valueOf(
+                resources.getColor(R.color.v3_text_3, ctx.theme)
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                (20 * dp).toInt(), (20 * dp).toInt()
+            )
+        }
+        row.addView(chevron)
+
+        binding.socialsGroup.addView(row)
+        binding.socialsCard.isVisible = true
+    }
+
+    private fun setupProfileCard(data: UserDetailResponse) {
+        val profile = data.profile
+        val user = data.user
+        binding.profileCard.visibility = View.VISIBLE
+
+        val chips = mutableListOf<Triple<String, String, Boolean>>()
+        chips.add(Triple("User ID", user.id.toString(), true))
+        chips.add(Triple("Account", user.account.orEmpty(), false))
+
+        if (!TextUtils.isEmpty(profile.gender)) {
+            val genderText = when (profile.gender) {
+                "male", "1" -> getString(R.string.male)
+                "female", "2" -> getString(R.string.female)
+                "0" -> getString(R.string.unknown_gender)
+                else -> profile.gender
+            }
+            chips.add(Triple("Gender", genderText, false))
+        }
+        if (!TextUtils.isEmpty(profile.region)) {
+            chips.add(Triple("Region", profile.region, false))
+        }
+        if (!TextUtils.isEmpty(profile.birth_day)) {
+            chips.add(Triple("Birthday", profile.birth_day, false))
+        }
+        if (!TextUtils.isEmpty(profile.job)) {
+            chips.add(Triple("Job", profile.job, false))
+        }
+        chips.add(Triple("Premium", if (user.is_premium == true) "★ Premium User" else "Standard", false))
+        chips.add(Triple("Pixiv URL", "https://www.pixiv.net/users/${user.id}", true))
+
+        renderChipGrid(
+            binding.profileGrid,
+            chips.size,
+            createChip = { createProfileChip(chips[it]) },
+            isFullWidth = { chips[it].first == "Pixiv URL" }
+        )
+    }
+
+    private fun createProfileChip(data: Triple<String, String, Boolean>): View {
+        val bd = ItemV3ProfileChipBinding.inflate(LayoutInflater.from(requireContext()))
+        bd.chipLabel.text = data.first
+        bd.chipValue.text = data.second
+        if (data.second == "★ Premium User") {
+            bd.chipValue.setTextColor(0xFFFFC233.toInt())
+        }
+        if (data.second.startsWith("http://") || data.second.startsWith("https://")) {
+            // 不用 autoLinkMask/LinkMovementMethod:LinkMovementMethod 继承
+            // ScrollingMovementMethod,横拖 URL 会跟外层 ViewPager2 抢手势,整页
+            // 跟着滑(issue #917)。改成整块点击打开 + 复用 textColorLink 的链接色,
+            // 跟 addSocialChip 的 tap-to-open 一致。
+            bd.chipValue.setTextColor(bd.chipValue.linkTextColors)
+            bd.root.setOnClickListener { openUrl(data.second) }
+        }
+        return bd.root
+    }
+
+    /**
+     * 子卡片先按「半行宽度」量自己的期望宽度，两个都放得下才并列，否则独占一行，而不是强行
+     * 并列截断。判断依赖 grid 的真实宽度：首次绑定时父卡片刚从 gone 切 visible，grid 还没量过，
+     * 要等这一次 measure/layout 跑完才有数，所以放到 preDraw 里摆（layout 已完成、还没画）。
+     * 不能拿屏幕宽度估算——平板双栏 / 分屏下 widthPixels 是整屏宽，估出来比实际宽一倍，长文本
+     * 照样被并列截断，等于没修。
+     *
+     * 也不能用 doOnLayout：OnLayoutChangeListener 是在 grid 自己的 layout() 里回调的，回调里
+     * addView 打上的 FORCE_LAYOUT 标记会在 layout() 收尾时被清掉，ViewRootImpl 判定「无需第二趟」，
+     * 首帧 grid 是空的，要等别的东西触发下一次 layout 才出现。preDraw 里 addView 走的是正常的
+     * requestLayout → 下一帧重排，OneShotPreDrawListener 随 view detach 自动摘除。
+     */
+    private fun renderChipGrid(
+        grid: LinearLayout,
+        chipCount: Int,
+        createChip: (Int) -> View,
+        isFullWidth: (Int) -> Boolean = { false },
+    ) {
+        grid.doOnPreDraw { layoutChipGrid(grid, chipCount, createChip, isFullWidth) }
+    }
+
+    private fun layoutChipGrid(
+        grid: LinearLayout,
+        chipCount: Int,
+        createChip: (Int) -> View,
+        isFullWidth: (Int) -> Boolean,
+    ) {
+        grid.removeAllViews()
+        val density = resources.displayMetrics.density
+        val rowGap = (10 * density).toInt()
+        val chipGap = (5 * density).toInt()
+
+        // 并列时 chip1 有 marginEnd、chip2 有 marginStart，一行让出两份 chipGap。
+        val halfSlotWidth = ((grid.width - chipGap * 2) / 2).coerceAtLeast(0)
+
+        fun fitsHalfSlot(chip: View): Boolean {
+            val bd = ItemV3ProfileChipBinding.bind(chip)
+            val labelWidth = bd.chipLabel.paint.measureText(
+                bd.chipLabel.text.toString().uppercase()
+            )
+            val valueWidth = bd.chipValue.paint.measureText(bd.chipValue.text.toString())
+            val desiredWidth = maxOf(labelWidth, valueWidth).toInt() +
+                bd.root.paddingLeft + bd.root.paddingRight
+            return desiredWidth <= halfSlotWidth
+        }
+
+        var i = 0
+        while (i < chipCount) {
+            val row = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = rowGap }
+            }
+
+            val chip1 = createChip(i)
+            val isLastSingle = i + 1 >= chipCount
+            val fullWidth = isFullWidth(i)
+            val chip1Fits = !fullWidth && !isLastSingle && fitsHalfSlot(chip1)
+            val chip2 = if (chip1Fits) createChip(i + 1) else null
+            val canPair = chip1Fits && chip2 != null && fitsHalfSlot(chip2)
+
+            if (canPair) {
+                chip1.layoutParams =
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = chipGap
+                    }
+                row.addView(chip1)
+
+                val chip2View = checkNotNull(chip2)
+                chip2View.layoutParams =
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginStart = chipGap
+                    }
+                row.addView(chip2View)
+                i++
+            } else {
+                // 独占一行时允许文本换行，长文本不再被单行省略
+                makeChipWrappable(chip1)
+                chip1.layoutParams =
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                row.addView(chip1)
+            }
+            grid.addView(row)
+            i++
+        }
+    }
+
+    @android.annotation.SuppressLint("InlinedApi")
+    private fun makeChipWrappable(chip: View) {
+        val bd = ItemV3ProfileChipBinding.bind(chip)
+        bd.chipValue.maxLines = Int.MAX_VALUE
+        bd.chipValue.ellipsize = null
+        bd.chipValue.breakStrategy = android.graphics.text.LineBreaker.BREAK_STRATEGY_HIGH_QUALITY
+    }
+
+    private fun setupWorkspaceCard(workspace: WorkspaceBean?) {
+        if (workspace == null) return
+
+        val items = mutableListOf<Pair<String, String>>()
+        workspace.pc?.takeIf { it.isNotBlank() }?.let { items.add("PC" to it) }
+        workspace.monitor?.takeIf { it.isNotBlank() }?.let { items.add("Monitor" to it) }
+        workspace.tool?.takeIf { it.isNotBlank() }?.let { items.add("Tool" to it) }
+        workspace.tablet?.takeIf { it.isNotBlank() }?.let { items.add("Tablet" to it) }
+        workspace.scanner?.takeIf { it.isNotBlank() }?.let { items.add("Scanner" to it) }
+        workspace.mouse?.takeIf { it.isNotBlank() }?.let { items.add("Mouse" to it) }
+        workspace.printer?.takeIf { it.isNotBlank() }?.let { items.add("Printer" to it) }
+        workspace.desktop?.takeIf { it.isNotBlank() }?.let { items.add("Desktop" to it) }
+        workspace.music?.takeIf { it.isNotBlank() }?.let { items.add("Music" to it) }
+        workspace.desk?.takeIf { it.isNotBlank() }?.let { items.add("Desk" to it) }
+        workspace.chair?.takeIf { it.isNotBlank() }?.let { items.add("Chair" to it) }
+        workspace.comment?.takeIf { it.isNotBlank() }?.let { items.add("Comment" to it) }
+
+        if (items.isEmpty()) return
+
+        binding.workspaceCard.visibility = View.VISIBLE
+        renderChipGrid(
+            binding.workspaceGrid,
+            items.size,
+            createChip = { createWorkspaceChip(items[it]) }
+        )
+
+        binding.workspaceHeaderToggle.setOnClickListener {
+            val isVisible = binding.workspaceGrid.visibility == View.VISIBLE
+            binding.workspaceGrid.visibility = if (isVisible) View.GONE else View.VISIBLE
+            binding.workspaceArrow.rotation = if (isVisible) 0f else 180f
+        }
+    }
+
+    private fun createWorkspaceChip(data: Pair<String, String>): View {
+        val bd = ItemV3ProfileChipBinding.inflate(LayoutInflater.from(requireContext()))
+        bd.chipLabel.text = data.first
+        bd.chipValue.text = data.second
+        return bd.root
+    }
+
+    private fun openUrl(url: String?) {
+        if (url.isNullOrEmpty()) return
+        ceui.lisa.helper.WebLinkHelper.openUrl(requireContext(), url)
+    }
+}

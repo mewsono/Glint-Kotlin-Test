@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+<!--    <color name="colorPrimary">#56baec</color>-->
+<!--    <color name="colorPrimaryDark">#56baec</color>-->
+<!--    <color name="colorAccent">#D81B60</color>-->
+<!--    <color name="light_primary_color">#B3E5FC</color>-->
+
+    <color name="colorAccent">#CDDC39</color>
+    <color name="light_new_primary_color">#eceff1</color>
+    <color name="illust_size_bg">#eeeffd</color>
+
+    <color name="background">#f2f2f2</color>
+    <color name="dark_bg">#999999</color>
+    <color name="light_bg">#f2f2f2</color>
+    <color name="settings_divider_bg">#f2f2f2</color>
+    <color name="second_light_bg">#fafafa</color>
+
+    <color name="follow_user_illust_divider">#ececec</color>
+
+
+    <color name="white">#FFFFFF</color>
+
+
+    <color name="always_white">#FFFFFF</color>
+    <color name="pivision_logo_color">#000000</color>
+    <color name="dark_text">#333333</color>
+
+    <color name="black_overlay">#66000000</color>
+    <color name="deep_dark">#212121</color>
+    <color name="hito_bg">#000339</color>
+    <color name="trans">#00eeeeee</color>
+    <!-- 标签 chip 文字（未选中态）。原本两套都是 #F0F0F0，白天模式下白对白彻底看不见。
+         白天用深色，夜间保持浅色（在 values-night 里）。 -->
+    <color name="novel_text_unselect">#1F1F1F</color>
+
+
+    <color name="rank_text_color">#2c333c</color>
+    <color name="white_to_gray">#FFFFFF</color>
+    <color name="view_history_title">#666666</color>
+    <color name="card_user_detail">#FAFAFA</color>
+    <color name="card_user_head">#FFFFFF</color>
+    <color name="normal_bg">#f4f4f4</color>
+    <color name="second_text_color">#333333</color>
+    <color name="no_data_color">#666666</color>
+    <color name="white_to_deep_dark">#FFFFFF</color>
+    <color name="f5_to_deep_dark">#F5F5F5</color>
+    <color name="comment_content">#333333</color>
+    <color name="comment_parent_bg">#F2F2F2</color>
+    <color name="about_user_divider">#E3E3E3</color>
+    <color name="about_user_left">#777777</color>
+    <color name="about_user_right">#BBBBBB</color>
+    <color name="about_user_white">#FFFFFF</color>
+
+
+    <color name="not_bookmarked">#a4afb3</color>
+    <color name="has_bookmarked">#FA3A3A</color>
+    <color name="has_downloaded">#2ECC71</color>
+    <color name="panel_bg">#EAEAEA</color>
+
+
+
+<!--    <color name="new_color_primary">#008BF4</color>-->
+    <color name="novel_holder">#000339</color>
+    <color name="rank_title">#333333</color>
+    <color name="fragment_right_divider">#f0f0f0</color>
+    <color name="recmd_user_horizontal">#eff0fe</color>
+    <color name="settings_divider">#e3e3e3</color>
+    <color name="fragment_illust_divider">#f3f4f5</color>
+    <color name="white_and_black">#FFFFFF</color>
+    <color name="f0_and_black">#f0f0f0</color>
+    <color name="black_to_grey">#000000</color>
+    <color name="white_to_1414">#FFFFFF</color>
+    <color name="user_name_horizontal">#7377ff</color>
+    <color name="white_to_black">#FFFFFF</color>
+    <color name="fragment_center">#FFFFFF</color>
+    <!-- 插画详情页图片画布底色:日间用柔和的浅薰衣草灰(非纯白),托住图片又不刺眼;夜间见 values-night -->
+    <color name="illust_canvas_bg">#ECEDF3</color>
+    <color name="button_stroke">#e8e8f2</color>
+
+
+    <color name="nb.read.bg_1">#FFFFFF</color>
+    <color name="nb.read.bg_2">#F1E2CD</color>
+    <color name="nb.read.bg_3">#CBDEEF</color>
+    <color name="nb.read.bg_4">#D6EAD5</color>
+    <color name="nb.read.bg_5">#000000</color>
+
+    <color name="nb.read.font_1">#999999</color>
+    <color name="nb.read.font_2">#2F332D</color>
+    <color name="nb.read.font_3">#92918C</color>
+    <color name="nb.read.font_4">#383429</color>
+    <color name="nb.read.font_5">#627176</color>
+
+
+
+    <color name="nb.read.bg.night">#000000</color>
+    <color name="nb.read.font_night">#99ffffff</color>
+
+    <color name="nb.read.menu.bg">#191919</color>
+    <color name="nb.read.menu.text">#CBCBCB</color>
+    <color name="nb.read.bar.translucent">#88000000</color>
+
+    <!--read-->
+    <color name="bg1">#FFFFFF</color>
+    <color name="bg2">#F1E2CD</color>
+    <color name="bg3">#CBDEEF</color>
+    <color name="bg4">#D6EAD5</color>
+    <color name="bg5">#000000</color>
+
+    <color name="pixivision_logo_1">#231815</color>
+    <color name="pixivision_logo_2">#221714</color>
+    <color name="glare_unselected_text">#7b7b7b</color>
+    <color name="novel_marker_add">#ff445b</color>
+    <color name="novel_marker_none">#eaeaea</color>
+
+    <color name="loading_placeholder">#14000000</color>
+
+    <color name="colorWhite">#FFFFFFFF</color>
+    <color name="colorWhite06">#0AFFFFFF</color>
+    <color name="colorWhite08">#14FFFFFF</color>
+    <color name="colorWhite10">#1AFFFFFF</color>
+    <color name="colorWhite20">#33FFFFFF</color>
+    <color name="colorWhite12">#1FFFFFFF</color>
+    <color name="colorWhite15">#26FFFFFF</color>
+    <color name="colorWhite25">#40FFFFFF</color>
+    <color name="colorWhite30">#4CFFFFFF</color>
+    <color name="colorWhite40">#66FFFFFF</color>
+    <color name="colorWhite50">#80FFFFFF</color>
+    <color name="colorWhite60">#99FFFFFF</color>
+    <color name="colorWhite80">#CCFFFFFF</color>
+    <color name="colorWhite85">#D9FFFFFF</color>
+    <color name="colorBlack">#000000</color>
+    <color name="colorBlack10">#1A000000</color>
+    <color name="colorBlack30">#4C000000</color>
+    <color name="colorBlack40">#66000000</color>
+    <color name="colorBlack50">#80000000</color>
+    <color name="colorBlack60">#99000000</color>
+    <color name="colorBlack80">#CC000000</color>
+    <color name="colorBlack90">#E6000000</color>
+    <color name="colorBlack95">#F3000000</color>
+    <color name="colorBlack08">#14000000</color>
+    <color name="voice_record_track_color">#33FFFFFF</color>
+    <color name="colorTextBlue">#FF34A6FF</color>
+    <color name="colorButtonBlue">#FF34A6FF</color>
+    <color name="congratsTextYellow">#FFFFE430</color>
+
+    <color name="buttonTextGreen">#FF94FFDE</color>
+    <color name="buttonTextBlue">#00E6FF</color>
+    <color name="buttonTextRed">#FF3E65</color>
+    <color name="warning_red">#E53935</color>
+    <color name="buttonSmallStrokeGreen">#FF0DFFCC</color>
+    <color name="buttonSmallStrokeBlue">#00E6FF</color>
+    <color name="buttonSmallStrokeRed">#FF5A7E</color>
+    <color name="buttonTextYellow">#FFD21E</color>
+    <color name="buttonYellowStroke">#9AFFD21E</color>
+    <color name="buttonYellowBackground">#29CF4200</color>
+    <color name="buttonTextPurple">#744EFF</color>
+
+    <color name="cyan">#00FFFF</color>
+    <color name="alphaBlack">#66000000</color>
+    <color name="alphaGreen">#66008000</color>
+    <color name="alphaWhite">#66FFFFFF</color>
+    <color name="defaultText">#8A000000</color>
+    <color name="green_shadow_color">#00A88C</color>
+    <color name="blue_shadow_color">#0088A8</color>
+    <color name="red_shadow_color">#A7002A</color>
+    <color name="green_mark_text_color">#00CFA5</color>
+    <color name="green_mark_shadow_color">#009262</color>
+
+    <color name="red_button_shadow_color">#A7002A</color>
+
+
+
+    <color name="event_sample_color_1">#8633FF</color>
+    <color name="event_sample_color_2">#F1347C</color>
+    <color name="event_sample_color_3">#FF7335</color>
+    <color name="event_sample_color_4">#F3AA00</color>
+    <color name="event_sample_color_5">#6CBE44</color>
+    <color name="event_sample_color_6">#00B994</color>
+    <color name="event_sample_color_7">#00ADF3</color>
+    <color name="event_sample_color_8">#6068FF</color>
+    <color name="event_sample_color_9">#8633FF</color>
+    <color name="event_sample_color_10">#C500FF</color>
+    <color name="event_sample_color_11">#F234C6</color>
+    <color name="image_background">#1AFFFFFF</color>
+
+
+    <color name="text00">#000000</color>
+    <color name="text10">#CC000000</color>
+    <color name="text20">#99000000</color>
+    <color name="white10">#1A000000</color>
+    <color name="white40">#66000000</color>
+    <color name="transparent">#00000000</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="list_divider">#26000000</color>
+
+
+    <color name="tag_placeholder_bg">#0DFFFFFF</color>
+    <color name="tag_placeholder_border">#66FFFFFF</color>
+    <color name="dark_text_color">#99FFFFFF</color>
+
+
+    <color name="splash_background">#10B7F5</color>
+    <color name="page_default_background">#0A001A</color>
+
+    <color name="view_pager_shoulder">#59FFFFFF</color>
+
+    <color name="secondary_text_color">#888888</color>
+    <color name="divider_color">#1F000000</color>
+
+    <!-- MeFragment stat-card 圆角图标背景:v3_blue 10% 透明,light/dark 各自对齐 -->
+    <color name="me_stat_icon_bg">#1A2B6FCC</color>
+
+    <!-- V3 Detail — Light Mode
+
+         下面写成 @color/wit_* 的这批是**引用别名**，真值在 :witstudio 的
+         values{,-night}/wit_colors.xml 里，夜间值也只活在那边（本文件的 values-night 版已删除对应条目）。
+
+         为什么不直接把资源搬走、让调用方改用 wit_* 名字：本仓 nonTransitiveRClass 是开的
+         （AGP 8 默认），资源一旦挪进模块，:app 里 191 处 `R.color.v3_*`
+         代码引用就没有一个 R 装得下了。留别名则 XML（约 800 处）和代码（191 处）全部零改动，
+         色值仍只有一份、不会漂移。
+
+         ⚠️ 别在这里写回具体色值——那会静默遮蔽模块的夜间值，且不会有任何编译期报错。
+         改色去 :witstudio/src/main/res/values{,-night}/wit_colors.xml。
+         别名清理（统一改名成 wit_*）是计划里的 phase 7，纯审美，可无限期推迟。 -->
+    <color name="v3_bg">@color/wit_bg</color>
+    <color name="v3_surface_1">@color/wit_surface_1</color>
+    <color name="v3_surface_2">@color/wit_surface_2</color>
+    <color name="v3_surface_3">@color/wit_surface_3</color>
+    <!-- feed_skeleton_block / feed_skeleton_highlight 已随骨架图搬进 :feeds 模块
+         (feeds/src/main/res/values/colors.xml)，经资源合并本模块照常引用得到。 -->
+    <!-- 进度条未完成段：比 v3_surface_2/3 对比更强，让 dark 模式下能清楚看到 track -->
+    <color name="v3_progress_track">@color/wit_progress_track</color>
+    <color name="v3_border_1">@color/wit_border_1</color>
+    <color name="v3_border_2">@color/wit_border_2</color>
+    <color name="v3_menu_bg">@color/wit_menu_bg</color>
+    <!-- 长按选中文字的高亮底色。QMUI 的 TextView.Compat 把它钉成了不透明的
+         qmui_config_color_background_pressed(#EEEFF1),且库里没有 night 版:夜间近白正文
+         压在浅灰块上直接看不见,日间那块浅灰压在白底上又几乎看不出选中(#973)。
+         日间改用 v3_blue 30% scrim(和 bulk_select_scrim 同值,选中态语言统一),
+         夜间见 values-night。主题色有 10 套(含亮黄 #fee65e),所以不跟 colorPrimary 走。 -->
+    <color name="text_selection_highlight">#4D2B6FCC</color>
+    <color name="v3_text_1">@color/wit_text_1</color>
+    <color name="v3_text_2">@color/wit_text_2</color>
+    <color name="v3_text_3">@color/wit_text_3</color>
+    <color name="v3_danger">@color/wit_danger</color>
+    <color name="v3_pink">@color/wit_pink</color>
+    <color name="v3_gold">@color/wit_gold</color>
+    <color name="v3_blue">@color/wit_blue</color>
+    <!-- 批量选择 cell 选中态 scrim:v3_blue 30% 透明,叠在 thumb 上方,共享 thumb 的
+         14dp clip,从根上躲掉"圆角不齐"的对比 (#4D = 30%) -->
+    <color name="bulk_select_scrim">#4D2B6FCC</color>
+    <!-- 批量操作底栏尾段(MD3-E tonal 按钮)的底色:v3_blue 14% 透明。v3_surface_2(#0E000000)
+         压在 v3_bg 上几乎看不出边界,挨着实心蓝的首段更显得像块空白;带一点强调色才读得出
+         "同一组按钮的低一档层级"。夜间见 values-night。 -->
+    <color name="bulk_action_tonal">#2E2B6FCC</color>
+    <color name="v3_green">@color/wit_green</color>
+    <color name="v3_purple">@color/wit_purple</color>
+    <!-- 聊天收到气泡底:日=纯白(压在 v3_bg #FAFAFA 上靠 hairline+微阴影浮出),夜见 values-night -->
+    <color name="chat_received_bubble">#FFFFFF</color>
+    <color name="v3_orange">@color/wit_orange</color>
+    <color name="v3_ambient_primary">@color/wit_ambient_primary</color>
+    <color name="v3_ambient_glow">#335B4CA0</color>
+    <color name="v3_nav_btn_bg">#33000000</color>
+    <color name="v3_hero_gradient_start">#FAFAFA</color>
+    <color name="v3_hero_gradient_mid">#EBFAFAFA</color>
+    <color name="v3_hero_gradient_end">#00FAFAFA</color>
+    <color name="v3_stat_views_start">#9055CC</color>
+    <color name="v3_stat_views_end">#C05588</color>
+    <color name="v3_stat_likes_start">#CC4488</color>
+    <color name="v3_stat_likes_end">#9055CC</color>
+    <color name="v3_stat_bookmarks_start">#5566CC</color>
+    <color name="v3_stat_bookmarks_end">#7766CC</color>
+    <color name="v3_stat_comments_start">#6677CC</color>
+    <color name="v3_stat_comments_end">#8877CC</color>
+    <!-- User header 关注 / 好P友 数字 — 白天饱和、夜间沿用浅色 accent。 -->
+    <color name="v3_stat_following_num">#6366F1</color>
+    <color name="v3_stat_mypixiv_num">#0EA574</color>
+    <color name="v3_tag_locked_bg">#0A3F3BA0</color>
+    <color name="v3_tag_locked_border">#1A3F3BA0</color>
+    <color name="v3_tag_locked_text">#5B4CA0</color>
+    <color name="v3_artist_banner_start">#333F3BA0</color>
+    <color name="v3_artist_banner_end">#333A2B6B</color>
+    <color name="v3_detail_chip_ambient">#5B4CA0</color>
+    <color name="v3_scroll_progress_start">#7C5CC8</color>
+    <color name="v3_scroll_progress_mid">#E0246A</color>
+    <color name="v3_scroll_progress_end">#D4A020</color>
+    <color name="v3_shimmer_color">#0A5B4CA0</color>
+    <color name="v3_premium_gold_start">#FFC233</color>
+    <color name="v3_premium_gold_end">#FFAA00</color>
+    <color name="v3_accent_line_purple">#405B4CA0</color>
+    <color name="v3_accent_line_pink">#40A04B8A</color>
+    <color name="v3_banner_placeholder_start">#E8E0F0</color>
+    <color name="v3_banner_placeholder_center">#DED8EE</color>
+    <color name="v3_banner_placeholder_end">#E0E4F0</color>
+
+    <!-- 站长推荐 score pill 字色:琥珀金 + 强阴影,任何封面底都能看清。 -->
+    <color name="trending_score_amber">#FFD54F</color>
+
+
+    <!-- MD3-E 设置页 -->
+    <color name="m3_settings_switch_track_off">#E4E1EC</color>
+    <color name="m3_settings_switch_outline">#797685</color>
+    <color name="m3_settings_icon_circle">#ECEAF6</color>
+
+    <!--
+      自定义主题色（issue #1014）的两个「占位」色资源：AppTheme.Custom 的 colorPrimary /
+      colorPrimaryDark 指向它们，运行时由 ceui.pixiv.ui.settings.CustomThemeColor 用
+      ResourcesLoader 覆盖成用户选的色值。这里写的字面量只在覆盖失败时兜底，所以取 0 号预设
+      （诗音紫）—— 与 updateTheme 的 default 分支同一个颜色，看起来就是「没设过自定义色」。
+      别把它们改成引用或加进任何 values-night：ResourcesLoader 只换这一条 entry。
+    -->
+    <color name="custom_theme_primary">#686bdd</color>
+    <color name="custom_theme_primary_dark">#4749a0</color>
+</resources>
+

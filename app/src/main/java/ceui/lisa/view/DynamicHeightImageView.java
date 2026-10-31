@@ -1,0 +1,253 @@
+package ceui.lisa.view;
+
+import android.content.Context;
+import android.graphics.Matrix;
+import android.graphics.drawable.Drawable;
+import android.util.AttributeSet;
+import android.view.ViewParent;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.recyclerview.widget.RecyclerView;
+
+import ceui.pixiv.ui.common.TabletLayout;
+
+public class DynamicHeightImageView extends androidx.appcompat.widget.AppCompatImageView {
+
+    private static final float WIDE_PANE_DP = 600f;
+    private static final float LONG_IMAGE_RATIO = 2.5f;
+    private float mHeightRatio;
+    private ScaleType tmpScaleType;
+    private boolean fitPortraitInViewport;
+    @Nullable private RecyclerView viewport;
+    private int viewportPaddingLeft;
+    private int viewportPaddingTop;
+    private int viewportPaddingRight;
+    private int viewportPaddingBottom;
+    private final Runnable resizeToViewport = this::requestLayout;
+    private final OnLayoutChangeListener viewportLayoutListener =
+            (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                int paddingLeft = v.getPaddingLeft();
+                int paddingTop = v.getPaddingTop();
+                int paddingRight = v.getPaddingRight();
+                int paddingBottom = v.getPaddingBottom();
+                boolean paddingChanged = paddingLeft != viewportPaddingLeft
+                        || paddingTop != viewportPaddingTop
+                        || paddingRight != viewportPaddingRight
+                        || paddingBottom != viewportPaddingBottom;
+                viewportPaddingLeft = paddingLeft;
+                viewportPaddingTop = paddingTop;
+                viewportPaddingRight = paddingRight;
+                viewportPaddingBottom = paddingBottom;
+                boolean sizeChanged = right - left != oldRight - oldLeft
+                        || bottom - top != oldBottom - oldTop;
+                if (isWidePane(right - left) && (sizeChanged || paddingChanged)) {
+                    removeCallbacks(resizeToViewport);
+                    post(resizeToViewport);
+                }
+            };
+
+    /** Opt-in for artwork detail only; feed thumbnails and manga retain natural height. */
+    public void setFitPortraitInViewport(boolean enabled) {
+        if (fitPortraitInViewport == enabled) return;
+        fitPortraitInViewport = enabled;
+        updateViewport();
+        requestLayout();
+    }
+
+    private void updateViewport() {
+        removeCallbacks(resizeToViewport);
+        if (viewport != null) viewport.removeOnLayoutChangeListener(viewportLayoutListener);
+        viewport = null;
+        if (!fitPortraitInViewport || !isAttachedToWindow()) return;
+        for (ViewParent parent = getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof RecyclerView) {
+                viewport = (RecyclerView) parent;
+                viewportPaddingLeft = viewport.getPaddingLeft();
+                viewportPaddingTop = viewport.getPaddingTop();
+                viewportPaddingRight = viewport.getPaddingRight();
+                viewportPaddingBottom = viewport.getPaddingBottom();
+                viewport.addOnLayoutChangeListener(viewportLayoutListener);
+                break;
+            }
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        updateViewport();
+        // A recycled holder can be measured while detached, when the viewport has a
+        // different height (for example after a fold or rotation). Re-request the
+        // child measurement after restoring the viewport listener so the cached
+        // measured height cannot survive the reattach.
+        if (fitPortraitInViewport && viewport != null && isWidePane(viewport.getWidth())) {
+            requestLayout();
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        removeCallbacks(resizeToViewport);
+        if (viewport != null) viewport.removeOnLayoutChangeListener(viewportLayoutListener);
+        viewport = null;
+        viewportPaddingLeft = 0;
+        viewportPaddingTop = 0;
+        viewportPaddingRight = 0;
+        viewportPaddingBottom = 0;
+        super.onDetachedFromWindow();
+    }
+
+    /** 非 null = 全景模式(见 {@link #setPanorama}),图按内容区高度等比放大、按 {@link PanoramaPan#fraction} 横向偏移。 */
+    @Nullable
+    private PanoramaPan panorama;
+    /** 进全景前的 scaleType,退出时还原。 */
+    @Nullable
+    private ScaleType scaleTypeBeforePanorama;
+    private final Matrix panoramaMatrix = new Matrix();
+
+    public DynamicHeightImageView(Context context) {
+        super(context);
+    }
+
+    public DynamicHeightImageView(Context context, @Nullable AttributeSet attrs) {
+        super(context, attrs);
+    }
+
+    public DynamicHeightImageView(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+    }
+
+    public void setHeightRatio(float ratio) {
+        if (ratio != mHeightRatio) {
+            mHeightRatio = ratio;
+            requestLayout();
+        }
+    }
+
+    public void setHeightRatioAndScaleType(float ratio, ScaleType scaleType) {
+        boolean b1 = ratio != mHeightRatio;
+        if (b1) {
+            mHeightRatio = ratio;
+            requestLayout();
+        }
+        tmpScaleType = scaleType;
+    }
+
+    /**
+     * 全景模式:超宽图(自然高只有一条缝)不再按宽度缩,而是把图放大到内容区高度、横向可拖。
+     * 传 null 退出,scaleType 还原到进入前的值。同一个 {@link PanoramaPan} 可以挂在多层 ImageView 上
+     * (底层 large + 顶层原图 overlay),偏移共享,拖动时两层同步。
+     */
+    public void setPanorama(@Nullable PanoramaPan pan) {
+        if (panorama == pan) {
+            return;
+        }
+        if (pan != null && panorama == null) {
+            scaleTypeBeforePanorama = getScaleType();
+            setScaleType(ScaleType.MATRIX);
+        } else if (pan == null && scaleTypeBeforePanorama != null) {
+            setScaleType(scaleTypeBeforePanorama);
+            scaleTypeBeforePanorama = null;
+        }
+        panorama = pan;
+        applyPanoramaMatrix();
+    }
+
+    public boolean isPanorama() {
+        return panorama != null;
+    }
+
+    /** 全景下图比内容区宽出的像素数;不在全景 / 图未到 / 图不比盒宽时为 0(= 没什么可拖)。 */
+    public float getPanoramaMaxShift() {
+        if (panorama == null) {
+            return 0f;
+        }
+        Drawable d = getDrawable();
+        if (d == null || d.getIntrinsicWidth() <= 0 || d.getIntrinsicHeight() <= 0) {
+            return 0f;
+        }
+        int contentW = getWidth() - getPaddingLeft() - getPaddingRight();
+        int contentH = getHeight() - getPaddingTop() - getPaddingBottom();
+        if (contentW <= 0 || contentH <= 0) {
+            return 0f;
+        }
+        float scale = (float) contentH / d.getIntrinsicHeight();
+        return Math.max(0f, d.getIntrinsicWidth() * scale - contentW);
+    }
+
+    /** 偏移变了(拖动)/图到了/尺寸变了都从这里重算矩阵。 */
+    public void applyPanoramaMatrix() {
+        PanoramaPan pan = panorama;
+        if (pan == null) {
+            return;
+        }
+        Drawable d = getDrawable();
+        if (d == null || d.getIntrinsicWidth() <= 0 || d.getIntrinsicHeight() <= 0) {
+            return;
+        }
+        int contentW = getWidth() - getPaddingLeft() - getPaddingRight();
+        int contentH = getHeight() - getPaddingTop() - getPaddingBottom();
+        if (contentW <= 0 || contentH <= 0) {
+            return;
+        }
+        float scale = (float) contentH / d.getIntrinsicHeight();
+        float shift = Math.max(0f, d.getIntrinsicWidth() * scale - contentW);
+        panoramaMatrix.setScale(scale, scale);
+        panoramaMatrix.postTranslate(-shift * pan.getFraction(), 0f);
+        setImageMatrix(panoramaMatrix);
+    }
+
+    @Override
+    public void setImageDrawable(@Nullable Drawable drawable) {
+        super.setImageDrawable(drawable);
+        applyPanoramaMatrix();
+    }
+
+    @Override
+    protected boolean setFrame(int l, int t, int r, int b) {
+        boolean changed = super.setFrame(l, t, r, b);
+        if (changed) {
+            applyPanoramaMatrix();
+        }
+        return changed;
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        if (mHeightRatio > 0.0) {
+            // set the image views size
+            int width = MeasureSpec.getSize(widthMeasureSpec);
+            int height = (int) (width * mHeightRatio);
+            // Use the actual pane, not displayMetrics: folding, split-screen and tablet
+            // two-pane layouts can all have a different width from the physical display.
+            // Very tall artwork keeps its readable, vertically scrolling presentation.
+            if (fitPortraitInViewport && viewport != null
+                    && isWidePane(width)
+                    && mHeightRatio > 1f && mHeightRatio < LONG_IMAGE_RATIO) {
+                int available = viewport.getHeight() - viewport.getPaddingTop() - viewport.getPaddingBottom();
+                if (available > 0) height = Math.min(height, available);
+            }
+            setMeasuredDimension(width, height);
+            if(tmpScaleType != null && tmpScaleType != getScaleType()){
+                setScaleType(tmpScaleType);
+            }
+        }
+        else {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        }
+    }
+
+    /**
+     * 「宽栏」= 平板双栏里那一条图片栏,夹高度只在这种栏里成立,所以除了 dp 宽度,还必须
+     * 「平板适配排版」真的开着。
+     * <p>只看 dp 宽度分不出设备形态:1080×1920 @240dpi 的低密度手机,栏宽 720dp,一样过 600dp,
+     * 但它是手机形态 —— 图必须按宽铺满。此时夹高度会让 FIT_CENTER 把宽度缩成「视口高 / 高宽比」,
+     * 左右露出 loading_placeholder 底色,即用户反馈的「白边」。设置里关掉平板排版 = 与手机排版一致,
+     * 因此这里一律不夹。
+     */
+    private boolean isWidePane(int widthPx) {
+        return TabletLayout.isEnabled(getResources().getConfiguration())
+                && widthPx / getResources().getDisplayMetrics().density >= WIDE_PANE_DP;
+    }
+}

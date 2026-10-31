@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V3 single-choice 行：标签左，选中时右侧 ✓ —— SimplePickerSheet / DurationPickerSheet
+     的相对时间段 / OtherFilterSheet 的 R-18 三选一 都用这个。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:minHeight="52dp"
+    android:orientation="horizontal"
+    android:paddingStart="18dp"
+    android:paddingEnd="18dp">
+
+    <TextView
+        android:id="@+id/check_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:paddingTop="14dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="14dp"
+        android:textColor="@color/v3_text_1"
+        android:textSize="15sp"
+        tools:text="@string/search_filter_v3_target_partial" />
+
+    <!-- 「其他条件」勾选行的持久化层级提示（issue #1240）：显示在勾的左侧——
+         「临时的（长按记住）」/「仅这里记住」；落到「全局记住」层时不显示（＝默认态）。
+         默认 gone —— SimplePickerSheet 也复用本布局，它不显示这枚提示。
+         文字色与勾同走主题色，在代码里 setTextColor(palette.textAccent)（同 check_mark）。
+         maxWidth 必须有：check_label 是 0dp+weight，只分到非权重子 view 量完后剩下的宽度。
+         俄 / 英文提示在 360dp 窄屏、字体放大时能吃掉整行，把标签挤成一字一行甚至 0 宽；
+         封顶后中日文仍单行，西文折成两行。 -->
+    <TextView
+        android:id="@+id/check_hint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:maxWidth="140dp"
+        android:paddingStart="6dp"
+        android:textSize="12sp"
+        android:visibility="gone"
+        tools:text="@string/search_filter_v3_row_temporary_hint"
+        tools:visibility="visible" />
+
+    <TextView
+        android:id="@+id/check_mark"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="8dp"
+        android:paddingBottom="2dp"
+        android:text="@string/v3_check_mark"
+        android:textSize="20sp"
+        android:visibility="invisible"
+        tools:visibility="visible" />
+
+</LinearLayout>

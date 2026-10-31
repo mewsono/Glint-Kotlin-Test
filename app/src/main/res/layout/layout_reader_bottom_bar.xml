@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_reader_bar_bottom"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="4dp">
+
+        <ImageButton
+            android:id="@+id/btn_prev_chapter"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/reader_desc_prev_chapter"
+            android:src="@drawable/ic_reader_prev_chapter"
+            app:tint="#FFFFFF" />
+
+        <SeekBar
+            android:id="@+id/sk_progress"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingHorizontal="8dp" />
+
+        <TextView
+            android:id="@+id/txt_progress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:minWidth="72dp"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            tools:text="12 / 128" />
+
+        <ImageButton
+            android:id="@+id/btn_next_chapter"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/reader_desc_next_chapter"
+            android:src="@drawable/ic_reader_next_chapter"
+            app:tint="#FFFFFF" />
+    </LinearLayout>
+
+    <!--
+        bottom row 权重不写死 weightSum：系列按钮 visibility=gone 时不参与权重，
+        其它 4 个按钮各占 1/4；系列按钮显示时 5 个按钮各占 1/5（自动收缩）。
+    -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <!--
+            系列切换按钮：当前小说有所属系列时显示，唤起 SeriesListSheet 切换其它单篇。
+            见 ReaderBottomBar.setSeriesVisible / NovelReaderV3Fragment.showSeriesSheet。
+        -->
+        <LinearLayout
+            android:id="@+id/btn_series"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_reader_series"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reader_btn_series"
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btn_chapters"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_reader_chapters"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reader_btn_chapters"
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btn_settings"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_reader_settings"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reader_btn_settings"
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btn_theme_toggle"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:id="@+id/img_theme_toggle"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_reader_theme"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/txt_theme_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reader_btn_theme_night"
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btn_search"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_reader_search"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reader_btn_search"
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

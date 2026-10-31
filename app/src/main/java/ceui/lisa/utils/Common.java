@@ -1,0 +1,601 @@
+package ceui.lisa.utils;
+
+import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.OpenableColumns;
+import android.text.TextUtils;
+import android.util.Log;
+import android.util.TypedValue;
+import android.view.View;
+import android.view.Window;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+
+import com.blankj.utilcode.util.AppUtils;
+import com.blankj.utilcode.util.FileIOUtils;
+import com.blankj.utilcode.util.FileUtils;
+import com.blankj.utilcode.util.Utils;
+import com.facebook.rebound.SimpleSpringListener;
+import com.facebook.rebound.Spring;
+import com.facebook.rebound.SpringChain;
+import com.hjq.toast.Toaster;
+import ceui.pixiv.witstudio.dialog.WitDialog;
+import ceui.pixiv.witstudio.dialog.WitDialogAction;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnsupportedCharsetException;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.stream.IntStream;
+
+import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+
+import ceui.lisa.R;
+import ceui.lisa.activities.MainActivity;
+import ceui.lisa.activities.Shaft;
+import ceui.lisa.activities.TemplateActivity;
+import ceui.pixiv.download.DownloadsRegistry;
+import ceui.pixiv.session.SessionManager;
+import ceui.lisa.activities.UActivity;
+import ceui.pixiv.ui.account.AccountDataPurge;
+import ceui.lisa.download.FileCreator;
+import ceui.lisa.file.LegacyFile;
+import ceui.lisa.file.SAFile;
+import ceui.pixiv.api.model.Illust;
+import ceui.lisa.models.UserContainer;
+import okhttp3.MediaType;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.Buffer;
+import okio.BufferedSource;
+import ceui.pixiv.ui.navigation.TemplateRoute;
+
+public class Common {
+
+    /**
+     * 移除文件系统保留字符
+     */
+    private static final String[][] safeReplacer = new String[][]{{"|", "%7c"}, {"\\", "%5c"}, {"?", "%3f"},
+            {"*", "\u22c6"}, {"<", "%3c"}, {"\"", "%22"}, {":", "%3a"}, {">", "%3e"}, {"/", "%2f"}};
+
+    /**
+     * Judge the String provided is numeric or not
+     * @param str The provided String
+     * @return true if the string is numeric
+     * */
+    public static boolean isNumeric(String str) {
+        for (int i = str.length(); --i >= 0; ) {
+            if (!Character.isDigit(str.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 把用户输入/外链里的数字串安全解析成 Pixiv 用户 ID(long)。
+     */
+    public static long safeUserId(String str) {
+        if (str == null) return 0L;
+        try {
+            long value = Long.parseLong(str.trim());
+            if (value > 0L) return value;
+        } catch (NumberFormatException ignored) {}
+        return 0L;
+    }
+
+    public static boolean isEmpty(List<?> list) {
+        return list == null || list.size() == 0;
+    }
+
+    public static void hideKeyboard(Activity activity) {
+        InputMethodManager imm = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        assert imm != null;
+        if (imm.isActive() && activity.getCurrentFocus() != null) {
+            if (activity.getCurrentFocus().getWindowToken() != null) {
+                imm.hideSoftInputFromWindow(activity.getCurrentFocus().getWindowToken(), InputMethodManager.HIDE_NOT_ALWAYS);
+            }
+        }
+    }
+
+    /**
+     * 退出登录，对应弹窗上的两个复选框：
+     *
+     * <ul>
+     *   <li>{@code deleteAccountInfo} —— 主项「删除账号信息」。不勾就只退出登录，本机什么都不删。
+     *   <li>{@code purgeLocalData} —— 从属项「同时清理该账号在本地残留的数据」。勾了才连带清掉
+     *       收藏镜像 / 首屏快照 / 按 uid 分键的私有配置；不勾则**只清账号机密**，也就是
+     *       {@code user_table} 那一行凭证。
+     * </ul>
+     *
+     * 要删东西时**先把本地清完，再清会话并跳登录页**。顺序不能反：清理是挂起操作
+     * （见 {@link AccountDataPurge}），先退出的就会出现「已经退出了、清理还在跑」的窗口 ——
+     * 用户这时用同一个账号重新登录，刚重建出来的镜像会被后到的清理删掉。
+     *
+     * 清理挂在应用级 scope 上，不挂页面 lifecycleScope：退出登录会把当前页面连同任务栈一起清掉
+     * （CLEAR_TASK），挂在页面上的任务会被顺手取消，结果就是「退出了、数据没清」。
+     *
+     * {@code onPurged} 在清理跑完、跳登录页之前于主线程回调（成功失败都回调），调用方用它收掉
+     * 自己挂的转圈；不走清理时不回调。
+     */
+    public static void logOut(Context context, boolean deleteAccountInfo, boolean purgeLocalData,
+                              @Nullable Runnable onPurged) {
+        if (!SessionManager.INSTANCE.isLoggedIn()) return;
+        long uid = SessionManager.INSTANCE.getLoggedInUid();
+        if (deleteAccountInfo && uid > 0L) {
+            AccountDataPurge.purgeAccountDataDetached(
+                    context.getApplicationContext(), uid, purgeLocalData, () -> {
+                        if (onPurged != null) onPurged.run();
+                        finishLogOut();
+                    });
+        } else {
+            finishLogOut();
+        }
+    }
+
+    /**
+     * 退出登录的收尾：清会话 + 回登录页。
+     *
+     * 用应用 context 起 Activity（同 {@link #restart()}）：调用方那一页可能在清理跑完之前
+     * 就被用户关掉了，拿一个已销毁的 Activity 去 startActivity 会直接抛。
+     */
+    private static void finishLogOut() {
+        SessionManager.INSTANCE.updateSession(null);
+        Intent intent = new Intent(Utils.getApp(), TemplateActivity.class);
+        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.LOGIN.key);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        Utils.getApp().startActivity(intent);
+    }
+
+    public static <T> void showLog(T t) {
+        Log.d("==SHAFT==>", String.valueOf(t));
+    }
+
+    public static <T> void showToast(T t) {
+        Toaster.show(t);
+    }
+
+    public static void showToast(int id) {
+        Toaster.show(id);
+    }
+
+    /**
+     * Show toast information
+     * @param t The information to show
+     * @param type Represents the type of toast
+     *             <p>
+     *                 2:Success
+     *             </p>
+     *             <p>
+     *                  3:Failure
+     *             </p>
+     * */
+    //2成功， 3失败， 4info
+    public static <T> void showToast(T t, int type) {
+        Toaster.show(t);
+    }
+
+    public static String getAppVersionCode(Context context) {
+        int versioncode = 0;
+        try {
+            PackageManager pm = context.getPackageManager();
+            PackageInfo pi = pm.getPackageInfo(context.getPackageName(), 0);
+            // versionName = pi.versionName;
+            versioncode = pi.versionCode;
+        } catch (Exception e) {
+            Log.e("VersionInfo", "Exception", e);
+        }
+        return versioncode + "";
+    }
+
+    /**
+     * 返回当前程序版本名
+     * @param context The app context
+     * @return versionName The version name of current application
+     */
+    public static String getAppVersionName(Context context) {
+        String versionName=null;
+        try {
+            PackageManager pm = context.getPackageManager();
+            PackageInfo pi = pm.getPackageInfo(context.getPackageName(), 0);
+            versionName = pi.versionName;
+        } catch (Exception e) {
+            Log.e("VersionInfo", "Exception", e);
+        }
+        return versionName;
+    }
+
+    public static <T> void showToast(T t, boolean isLong) {
+        if (isLong) {
+            Toaster.showLong(t);
+        } else {
+            Toaster.showShort(t);
+        }
+    }
+
+    public static void copy(Context context, String s) {
+        ClipBoardUtils.putTextIntoClipboard(context, s, true);
+    }
+
+    public static void copy(Context context, String s, boolean hasHint) {
+        ClipBoardUtils.putTextIntoClipboard(context, s, hasHint);
+    }
+
+    public static String checkEmpty(String before) {
+        return TextUtils.isEmpty(before) ? Shaft.getContext().getString(R.string.no_info) : before;
+    }
+
+    public static String checkEmpty(EditText before) {
+        if (before != null && before.getText() != null && !TextUtils.isEmpty(before.getText().toString())) {
+            return before.getText().toString();
+        } else {
+            return "";
+        }
+    }
+
+    public static void animate(LinearLayout linearLayout) {
+        SpringChain springChain = SpringChain.create(40, 8, 60, 10);
+
+        int childCount = linearLayout.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            final View view = linearLayout.getChildAt(i);
+
+            springChain.addSpring(new SimpleSpringListener() {
+                @Override
+                public void onSpringUpdate(Spring spring) {
+                    view.setTranslationX((float) spring.getCurrentValue());
+                }
+            });
+        }
+
+        List<Spring> springs = springChain.getAllSprings();
+        for (int i = 0; i < springs.size(); i++) {
+            springs.get(i).setCurrentValue(400);
+        }
+        springChain.setControlSpringIndex(0).getControlSpring().setEndValue(0);
+    }
+
+    public static void createDialog(Context context){
+        WitDialog qmuiDialog = new WitDialog.MessageDialogBuilder(context)
+                .setTitle(context.getString(R.string.string_188))
+                .setMessage(context.getString(R.string.dont_catch_me))
+                .addAction(context.getString(R.string.string_189), new WitDialogAction.ActionListener() {
+                    @Override
+                    public void onClick(WitDialog dialog, int index) {
+                        //保存SHOW_DIALOG 为false，不再提示
+                        Shaft.getMMKV().encode(Params.SHOW_DIALOG, false);
+                        dialog.dismiss();
+                    }
+                })
+                .addAction(context.getString(R.string.string_190), new WitDialogAction.ActionListener() {
+                    @Override
+                    public void onClick(WitDialog dialog, int index) {
+                        //保存SHOW_DIALOG 为true，需要继续提示
+                        Shaft.getMMKV().encode(Params.SHOW_DIALOG, true);
+                        dialog.dismiss();
+                    }
+                })
+                .create();
+        Window window = qmuiDialog.getWindow();
+        if (window != null) {
+            window.setWindowAnimations(R.style.dialog_animation_scale);
+        }
+        qmuiDialog.show();
+    }
+
+    public static String getResponseBody(Response response) {
+
+        Charset UTF8 = StandardCharsets.UTF_8;
+        ResponseBody responseBody = response.body();
+        BufferedSource source = responseBody.source();
+        try {
+            source.request(Long.MAX_VALUE); // Buffer the entire body.
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        Buffer buffer = source.getBuffer();
+
+        Charset charset = UTF8;
+        MediaType contentType = responseBody.contentType();
+        if (contentType != null) {
+            try {
+                charset = contentType.charset(UTF8);
+            } catch (UnsupportedCharsetException e) {
+                e.printStackTrace();
+            }
+        }
+        return buffer.clone().readString(charset);
+    }
+
+    public static void showUser(Context context, UserContainer userContainer) {
+        Intent intent = new Intent(context, UActivity.class);
+        intent.putExtra(Params.USER_ID, userContainer.getUserId());
+        context.startActivity(intent);
+    }
+
+
+    public static <T> String cutToJson(List<T> from) {
+        if (isEmpty(from)) {
+            return "";
+        }
+
+        if (from.size() > 5) {
+            List<T> temp = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                temp.add(from.get(i));
+            }
+            return Shaft.sGson.toJson(temp);
+        } else {
+            return Shaft.sGson.toJson(from);
+        }
+    }
+
+    public static boolean isAndroidQ() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
+    }
+
+    public static void restart() {
+        Intent intent = new Intent();
+        String realActivityClassName = MainActivity.class.getName();
+        intent.setComponent(new ComponentName(Utils.getApp(), realActivityClassName));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        Utils.getApp().startActivity(intent);
+    }
+
+    /**
+     * left 0, right 5
+     *
+     * 结果只有 0 1 2 3 4
+     *
+     *
+     * @param left
+     * @param right
+     * @return
+     */
+    public static int flatRandom(int left, int right) {
+        Random r = new Random();
+        return r.nextInt(right - left) + left;
+    }
+
+    public static int flatRandom(int right) {
+        return flatRandom(0, right);
+    }
+
+    /**
+     * 解析主题相关的 attribute 的当前值
+     */
+    public static int resolveThemeAttribute(Context context, int resId){
+        TypedValue typedValue = new TypedValue();
+        context.getTheme().resolveAttribute(resId, typedValue, true);
+        return typedValue.data;
+    }
+
+    /**
+     * 移除文件系统保留字符
+     */
+    public static String removeFSReservedChars(String s){
+        try {
+            for (String[] strings : safeReplacer) {
+                s = s.replace(strings[0], strings[1]);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return s;
+    }
+
+    /**
+     * 检查插画是否已经下载过
+     * SAF 与否只认 V3 下载配置——遗留 downloadWay 在还原异机备份后会与实际存储脱节（#984）。
+     * */
+    public static boolean isIllustDownloaded(Illust illust) {
+        try {
+            if (illust.getPage_count() == 1) {
+                if (DownloadsRegistry.isSaf()) {
+                    return SAFile.isFileExists(Shaft.getContext(), illust);
+                } else {
+                    return FileCreator.isExist(illust, 0);
+                }
+            } else {
+                IntStream pageIndexStream = IntStream.range(0, illust.getPage_count());
+                if (DownloadsRegistry.isSaf()) {
+                    return pageIndexStream
+                            .allMatch(index -> SAFile.isFileExists(Shaft.getContext(), illust, index));
+                } else {
+                    return pageIndexStream
+                            .allMatch(index -> FileCreator.isExist(illust, index));
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    /**
+     * 检查插画某页是否已经下载过
+     * */
+    public static boolean isIllustDownloaded(Illust illust, int index) {
+        try {
+            if (illust.getPage_count() == 1) {
+                if (DownloadsRegistry.isSaf()) {
+                    return SAFile.isFileExists(Shaft.getContext(), illust);
+                } else {
+                    return FileCreator.isExist(illust, 0);
+                }
+            } else {
+                if (DownloadsRegistry.isSaf()) {
+                    return SAFile.isFileExists(Shaft.getContext(), illust, index);
+                } else {
+                    return FileCreator.isExist(illust, index);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+
+    /**
+     * 根据ISO8601格式的时间字符串获取年月日时分格式的字符串
+     */
+    public static String getLocalYYYYMMDDHHMMString(String source) {
+        try {
+            return ZonedDateTime.parse(source).withZoneSameInstant(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return source.substring(0, 16);
+        }
+    }
+
+    /**
+     * 根据ISO8601格式的时间字符串获取年月日时分秒格式的字符串
+     */
+    public static String getLocalYYYYMMDDHHMMSSString(String source) {
+        try {
+            return ZonedDateTime.parse(source).withZoneSameInstant(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return source;
+        }
+    }
+
+    /**
+     * 根据ISO8601格式的时间字符串获取年月日时分秒格式的字符串（文件用）
+     */
+    public static String getLocalYYYYMMDDHHMMSSFileString(String source) {
+        try {
+            return ZonedDateTime.parse(source).withZoneSameInstant(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return source;
+        }
+    }
+
+    /**
+     * 获取小说文字颜色配置
+     */
+    public static int getNovelTextColor(){
+        int color = Shaft.sSettings.getNovelHolderTextColor();
+        if(color == 0){
+            return ContextCompat.getColor(Shaft.getContext(), R.color.white);
+        }
+        return color;
+    }
+
+    public static int getNovelTextSize() {
+        int size = Shaft.sSettings.getNovelHolderTextSize();
+        if (size == 0) {
+            return 16;  // 默认大小
+        }
+        return size;
+    }
+
+    /**
+     * 文件大小是否满足反向搜索条件。
+     *
+     * <p>查不到大小时放行，而不是拦下：SIZE 这一列不是 content provider 的义务，分享进来的
+     * Uri 经常压根没有它。拦下会弹「图像大小超过限制」——一句和事实相反的提示，不如把这张图
+     * 交给引擎自己去拒。</p>
+     *
+     * <p>原先这里有三个能直接崩的地方：{@code getColumnIndex} 查不到列时返回 -1 却照样拿去
+     * {@code getLong}；{@code moveToFirst()} 的返回值被丢掉，空游标一样往下走；游标没有
+     * try-finally，中途抛异常就泄漏。</p>
+     *
+     * @param uri 文件地址
+     * @return 大小是否可搜索
+     */
+    public static boolean isFileSizeOkToReverseSearch(Uri uri, long maxImageSize) {
+        if (uri == null) {
+            return false;
+        }
+        try (Cursor cursor = Shaft.getContext().getContentResolver()
+                .query(uri, null, null, null, null)) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                return true;
+            }
+            int sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE);
+            if (sizeIndex < 0 || cursor.isNull(sizeIndex)) {
+                return true;
+            }
+            return cursor.getLong(sizeIndex) <= maxImageSize;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return true;
+        }
+    }
+
+    /**
+     * 把待搜图片复制进 cache/reverse_search/，并换成 FileProvider 的 content:// Uri。
+     *
+     * 换 Uri 是必须的：图搜的上传由 WebView 自己发起（见 {@link ReverseImage}），
+     * 它读文件走 ContentResolver，读不到我们私有目录里的 file:// 路径。
+     *
+     * <p>跑在子线程（见 {@link ReverseImage#searchFrom}），所以异常一律吞在这里换成 null ——
+     * 漏出去的话没人接，直接把进程带走。{@code openInputStream} 会返回 null、
+     * {@code FileProvider.getUriForFile} 在路径没配进 provider_paths 时会抛 IAE，都在这个范围内。</p>
+     *
+     * @return FileProvider Uri，复制失败时为 null
+     */
+    public static Uri copyUriToReverseSearchCache(Uri uri) {
+        File folder = LegacyFile.reverseSearchCacheFolder(Utils.getApp());
+        // 只留最新那一张。这个目录不在设置页的「清理图片缓存」范围里，不清就是每搜一次
+        // 留一个最大 15MB 的文件、永远不掉。
+        FileUtils.deleteAllInDir(folder);
+        try (InputStream is = Utils.getApp().getContentResolver().openInputStream(uri)) {
+            if (is == null) {
+                return null;
+            }
+            File file = new File(folder, String.valueOf(System.currentTimeMillis()));
+            if (!FileIOUtils.writeFileFromIS(file.getAbsolutePath(), is)) {
+                return null;
+            }
+            return FileProvider.getUriForFile(Utils.getApp(), Utils.getApp().getPackageName() + ".provider", file);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public static Uri copyBitmapToImageCacheFolder(Bitmap bitmap, String fileName){
+        try {
+            // shared_images
+            File cachePath = new File(Utils.getApp().getExternalCacheDir(), "images");
+            cachePath.mkdirs();
+            File file = new File(cachePath, fileName);
+            FileOutputStream fileOutputStream = new FileOutputStream(file);
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, fileOutputStream);
+            fileOutputStream.close();
+            return FileProvider.getUriForFile(Utils.getApp(), Utils.getApp().getPackageName() + ".provider", file);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+}

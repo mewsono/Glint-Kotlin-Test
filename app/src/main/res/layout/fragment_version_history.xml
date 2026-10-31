@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  版本历史：统一 toolbar_layout + feeds 框架的 feed_root，和广场屏蔽名单同一套骨架。
+  分页（本页只有一页）、下拉刷新、首屏骨架、空态与失败重试全部归 feeds；这里只留顶栏、
+  宽屏限宽的 column（代码里收窄到 720dp）和列表。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/v3_bg"
+    android:orientation="vertical">
+
+    <include layout="@layout/toolbar_layout" />
+
+    <FrameLayout
+        android:id="@+id/version_history_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/version_history_column"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center_horizontal"
+            android:orientation="vertical">
+
+            <include
+                android:id="@+id/feed_root"
+                layout="@layout/fragment_feed"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

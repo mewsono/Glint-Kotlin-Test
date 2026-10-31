@@ -1,0 +1,65 @@
+apply plugin: 'com.android.library'
+
+android {
+    compileSdk 36
+
+    defaultConfig {
+        minSdkVersion 24
+        targetSdkVersion 36
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        viewBinding = true
+    }
+
+    // 与包名一致：模块内的 R 就是 ceui.pixiv.feeds.R，消费方（:app）经资源合并照常
+    // 拿得到 @layout/fragment_feed 等，源码侧一行 import 都不用改。
+    namespace = 'ceui.pixiv.feeds'
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+dependencies {
+    // ── api：类型长在本模块的公开 API 上，消费方不声明也要能编过 ──────────────
+    // FeedCell : RecyclerView.ViewHolder、onCreateLayoutManager(): LayoutManager
+    api libs.androidxRecyclerView
+    // FeedFragment : Fragment、Fragment.feedViewModels()
+    api libs.androidxFragment
+    // FeedViewModel : ViewModel
+    api libs.androidxLifecycleViewModel
+    // feedBinding.feedRefreshLayout 是 SwipeRefreshLayout（子类要碰）
+    api libs.androidxSwipeRefreshLayout
+    // FeedViewModel.uiState: StateFlow、FeedSource 的一票 suspend
+    api libs.coroutinesAndroid
+    // Gson 2.11+ 自带 R8 full-mode 的 TypeToken / @SerializedName consumer rules。
+    // FeedFirstPageCache 的公开 API 暴露 Gson，因此由本模块显式声明并统一全仓版本。
+    api libs.gson
+
+    // ── implementation：纯内部实现 ─────────────────────────────────────────
+    implementation libs.androidxCore
+    // repeatOnLifecycle / lifecycleScope
+    implementation libs.androidxLifecycleRuntime
+    implementation libs.timber
+
+    testImplementation libs.junit4
+    testImplementation libs.coroutinesTest
+
+    // 刻意不引：retrofit / okhttp / Room / glide / :models / 任何 pixiv 代码。
+    // 本模块不认识 pixiv，只认识「一个能翻页的 FeedSource 和一组 FeedRenderer」。
+    // 宿主特有的东西（主题配色、Toast、错误文案、网络状态）经 FeedHost 注入，见 FeedHost.kt。
+}

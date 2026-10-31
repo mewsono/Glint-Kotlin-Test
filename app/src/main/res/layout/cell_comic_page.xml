@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.github.panpf.zoomimage.SketchZoomImageView
+        android:id="@+id/image"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter" />
+
+    <!-- 与插画详情页的下载进度环样式统一(确定模式,由 ImageLoadState.percent 驱动)。
+         indicatorColor 由适配器按黑/白底着色(白底用深灰),track 同色低透明度。 -->
+    <ceui.lisa.view.SeamlessCircularProgressIndicator
+        android:id="@+id/progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone"
+        app:indicatorColor="@color/white"
+        app:indicatorSize="30dp"
+        app:trackColor="@color/voice_record_track_color"
+        app:trackCornerRadius="4dp"
+        app:trackThickness="5dp" />
+
+    <ImageView
+        android:id="@+id/reload"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="center"
+        android:padding="12dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_baseline_refresh_48"
+        android:tint="@color/white_to_gray"
+        android:visibility="gone"
+        android:contentDescription="@string/comic_reader_retry" />
+</FrameLayout>

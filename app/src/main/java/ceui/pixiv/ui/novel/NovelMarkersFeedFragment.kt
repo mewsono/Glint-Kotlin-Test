@@ -1,0 +1,188 @@
+package ceui.pixiv.ui.novel
+
+import android.content.Intent
+import android.os.Bundle
+import android.view.View
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewbinding.ViewBinding
+import ceui.lisa.R
+import ceui.lisa.activities.SearchActivity
+import ceui.lisa.activities.TemplateActivity
+import ceui.lisa.activities.UActivity
+import ceui.lisa.databinding.FragmentToolbarFeedBinding
+import ceui.lisa.databinding.RecyNovelMarkersBinding
+import ceui.pixiv.api.Client
+import ceui.lisa.model.ListNovelMarkers
+import ceui.lisa.models.MarkedNovelItem
+import ceui.lisa.utils.GlideUtil
+import ceui.lisa.utils.Params
+import ceui.lisa.utils.PixivOperate
+import ceui.lisa.view.LinearItemDecoration
+import ceui.pixiv.feeds.FeedCell
+import ceui.pixiv.feeds.FeedFragment
+import ceui.pixiv.feeds.FeedItem
+import ceui.pixiv.feeds.FeedRenderer
+import ceui.pixiv.feeds.feedRenderer
+import ceui.pixiv.feeds.feedViewModels
+import ceui.pixiv.feeds.pixiv.PixivFeedSource
+import ceui.pixiv.feeds.pixiv.pixivFeedSource
+import ceui.pixiv.ui.common.setUpToolbar
+import ceui.pixiv.ui.common.tryOpenNovelReaderDirect
+import ceui.pixiv.ui.common.viewBinding
+import ceui.pixiv.utils.pinHostGlide
+import ceui.pixiv.utils.ppppx
+import ceui.pixiv.utils.setOnClick
+import com.bumptech.glide.Glide
+import com.bumptech.glide.RequestManager
+import java.util.Locale
+import ceui.pixiv.ui.navigation.TemplateRoute
+
+/**
+ * 「小说书签」列表页（feeds 框架版，替代 legacy [ceui.lisa.fragments.FragmentNovelMarkers] +
+ * NovelMarkersAdapter）。宿主是 TemplateActivity，用 feeds 独立页统一的 fragment_toolbar_feed
+ * （webview 5 件套 toolbar），toolbar 标题 [R.string.core_string_novel_marker]。
+ *
+ * 卡形与交互 1:1 复刻 legacy NovelMarkersAdapter 的 recy_novel_markers（databinding 生成的
+ * [RecyNovelMarkersBinding] 天然实现 ViewBinding，直接喂 [feedRenderer]，对齐 MutedUserFeedFragment
+ * 复用 recy_simple_user 的做法）：封面 / 头像 / 标题 / 系列 / 日期 / 标签 / 字数 / 收藏数 / 书签按钮，
+ * 以及全部子点击（整卡进小说详情、封面看大图、头像作者进画师页、标签搜索、系列进小说系列、书签增删）。
+ */
+class NovelMarkersFeedFragment : FeedFragment(R.layout.fragment_toolbar_feed) {
+
+    private val binding by viewBinding(FragmentToolbarFeedBinding::bind)
+
+    override val feedViewModel by feedViewModels {
+        // 零捕获：source 无参，不碰 Fragment / View。
+        novelMarkersFeedSource()
+    }
+
+    /**
+     * 封面 + 头像的 Glide 请求管理器，建一次复用（对齐 MutedUserFeedFragment.userGlide）：
+     * bind 加载 / recycle 清理都走它，避免每处 `Glide.with(view)` 递归找承载 fragment。
+     */
+    private val rowGlide: RequestManager by lazy { Glide.with(this) }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        pinHostGlide(rowGlide)
+        setUpToolbar(binding, feedBinding.feedListView)
+        binding.toolbarTitle.text = getString(R.string.core_string_novel_marker)
+    }
+
+    override fun onCreateRenderers(): List<FeedRenderer<out FeedItem, out ViewBinding>> {
+        return listOf(novelMarkerRenderer())
+    }
+
+    override fun onListReady(listView: RecyclerView) {
+        // 卡间距对齐 legacy ListFragment 的 LinearItemDecoration(12dp)。
+        listView.addItemDecoration(LinearItemDecoration(12.ppppx))
+    }
+
+    private fun novelMarkerRenderer() = feedRenderer<NovelMarkerFeedItem, RecyNovelMarkersBinding>(
+        inflate = RecyNovelMarkersBinding::inflate,
+        // 点击监听只在 onCreate 注册一次，绑定时零 lambda 分配；点击那一刻读 cell.item 拿当下条目。
+        create = { cell ->
+            cell.binding.root.setOnClick { openNovel(cell.item.marker) }
+            cell.binding.cover.setOnClick { openCover(cell.item.marker) }
+            cell.binding.userHead.setOnClick { openUser(cell.item.marker) }
+            cell.binding.author.setOnClick { openUser(cell.item.marker) }
+            cell.binding.series.setOnClick { openSeries(cell.item.marker) }
+            cell.binding.mark.setOnClick {
+                val marker = cell.item.marker
+                PixivOperate.postNovelMarker(marker.novel_marker, marker.novel.id.toInt(), cell.binding.mark)
+            }
+            cell.binding.novelTag.setOnItemClickListener { _, position ->
+                openTagSearch(cell.item.marker, position)
+            }
+        },
+        recycle = { cell ->
+            rowGlide.clear(cell.binding.cover)
+            rowGlide.clear(cell.binding.userHead)
+        },
+    ) { cell -> bindRow(cell) }
+
+    private fun bindRow(cell: FeedCell<NovelMarkerFeedItem, RecyNovelMarkersBinding>) {
+        val b = cell.binding
+        val novel = cell.item.marker.novel
+        val seriesTitle = novel.series?.title
+        if (!seriesTitle.isNullOrEmpty()) {
+            b.series.visibility = View.VISIBLE
+            b.series.text = getString(R.string.string_184, seriesTitle)
+        } else {
+            b.series.visibility = View.GONE
+        }
+        b.title.text = novel.title
+        b.date.text = novel.create_date?.take(10).orEmpty()
+        // 服务端 marked_novels 正常都会带 user / image_urls，但脏数据不该把整页 fling 崩掉。
+        b.author.text = novel.user?.name.orEmpty()
+        b.howManyWord.text = String.format(Locale.getDefault(), "%d字", novel.text_length)
+        b.bookmarkCount.text = novel.total_bookmarks.toString()
+        b.novelTag.compact = true
+        b.novelTag.showTranslation = false
+        b.novelTag.searchIndex = 1
+        b.novelTag.setTags(novel.tags.orEmpty())
+        rowGlide.load(GlideUtil.getUrl(novel.image_urls?.findMaxSizeUrl())).into(b.cover)
+        rowGlide.load(GlideUtil.getHead(novel.user)).into(b.userHead)
+    }
+
+    /** 整卡点击：进小说详情（携带整份 Novel，隐藏状态栏），与 legacy itemView 点击一字不差。 */
+    private fun openNovel(marker: MarkedNovelItem) {
+        if (requireContext().tryOpenNovelReaderDirect(marker.novel.id.toLong())) return
+        val intent = Intent(requireContext(), TemplateActivity::class.java)
+        intent.putExtra(Params.CONTENT, marker.novel)
+        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.NOVEL_DETAIL.key)
+        intent.putExtra("hideStatusBar", true)
+        startActivity(intent)
+    }
+
+    /** 封面点击：看大图（原图 URL 走图片详情）。 */
+    private fun openCover(marker: MarkedNovelItem) {
+        val intent = Intent(requireContext(), TemplateActivity::class.java)
+        val cover = marker.novel.image_urls?.findMaxSizeUrl() ?: return
+        intent.putExtra(Params.URL, GlideUtil.getUrl(cover).toStringUrl())
+        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.IMAGE_DETAIL.key)
+        startActivity(intent)
+    }
+
+    /** 头像 / 作者名点击：进画师页。 */
+    private fun openUser(marker: MarkedNovelItem) {
+        val intent = Intent(requireContext(), UActivity::class.java)
+        val userId = marker.novel.user?.id ?: return
+        intent.putExtra(Params.USER_ID, userId)
+        startActivity(intent)
+    }
+
+    /** 系列点击：进小说系列页（series id 走 [NovelSeriesFragment.ARG_SERIES_ID]，long）。 */
+    private fun openSeries(marker: MarkedNovelItem) {
+        val series = marker.novel.series ?: return
+        val intent = Intent(requireContext(), TemplateActivity::class.java)
+        intent.putExtra(NovelSeriesFragment.ARG_SERIES_ID, series.id.toLong())
+        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.NOVEL_SERIES.key)
+        startActivity(intent)
+    }
+
+    /** 标签点击：按标签搜索（INDEX=1 小说档）。 */
+    private fun openTagSearch(marker: MarkedNovelItem, position: Int) {
+        val intent = Intent(requireContext(), SearchActivity::class.java)
+        val tagName = marker.novel.tags?.getOrNull(position)?.name ?: return
+        intent.putExtra(Params.KEY_WORD, tagName)
+        intent.putExtra(Params.INDEX, 1)
+        startActivity(intent)
+    }
+}
+
+/**
+ * 书签条目：持 legacy [MarkedNovelItem]（网络下行的 marked_novels 单条）。
+ * feedKey 用小说 id（long，同类内唯一稳定）。
+ */
+class NovelMarkerFeedItem(val marker: MarkedNovelItem) : FeedItem {
+    override val feedKey: Any get() = marker.novel.id
+}
+
+/**
+ * 小说书签数据源：首页 getNovelMarkers，翻页由 [PixivFeedSource] 按 next_url 重放。零 Fragment 捕获。
+ */
+private fun novelMarkersFeedSource(): PixivFeedSource<ListNovelMarkers> =
+    pixivFeedSource(initialFetch = { Client.appApi.getNovelMarkers() }) { resp, _ ->
+        resp.displayList.map { NovelMarkerFeedItem(it) }
+    }

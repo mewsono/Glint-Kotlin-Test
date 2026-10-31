@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="empty_list_1">居然什麼也沒有</string>
+    <string name="list_load_failed_tap_retry">載入失敗，點擊重試</string>
+    <string name="feed_error_tap_retry">點擊重試</string>
+    <string name="feed_state_go_network_test">去網路測試</string>
+    <string name="feed_append_paused_tap_to_continue">點擊載入更多</string>
+</resources>

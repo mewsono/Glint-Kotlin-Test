@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="center">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/head"
+            style="@style/textMontserratBold"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="20dp"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:text="@string/string_143"
+            android:textColor="@color/text00"
+            android:textSize="18sp">
+
+        </TextView>
+
+        <TextView
+            android:id="@+id/title"
+            style="@style/textMontserratSemiBold"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="20dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="20dp"
+            android:gravity="center"
+            android:text="Original Name"
+            android:textColor="@color/text00"
+            android:textSize="16sp">
+
+        </TextView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="20dp"
+            android:layout_marginBottom="20dp">
+
+            <FrameLayout
+                android:id="@+id/cancel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="5dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_white_button">
+
+                <TextView
+                    style="@style/textMontserratSemiBold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:includeFontPadding="false"
+                    android:text="@string/cancel"
+                    android:textColor="@color/text00" />
+
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/ok"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="5dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_green_button">
+
+                <TextView
+                    style="@style/textMontserratSemiBold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:includeFontPadding="false"
+                    android:text="@string/button_ok"
+                    android:textColor="@color/text00" />
+
+            </FrameLayout>
+
+        </LinearLayout>
+
+
+    </LinearLayout>
+
+</FrameLayout>

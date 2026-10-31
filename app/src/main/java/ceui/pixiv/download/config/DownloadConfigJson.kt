@@ -1,0 +1,102 @@
+package ceui.pixiv.download.config
+
+import android.net.Uri
+import ceui.pixiv.download.model.Bucket
+import ceui.pixiv.download.template.DefaultTemplates
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonDeserializationContext
+import com.google.gson.JsonDeserializer
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonSerializationContext
+import com.google.gson.JsonSerializer
+import java.lang.reflect.Type
+
+/**
+ * Memento: serialise a [DownloadConfig] to / from a human-readable JSON
+ * string. Used by [DownloadConfigStore] and by any import/export UI.
+ *
+ * The [StorageChoice] hierarchy is tagged with a `kind` discriminator so the
+ * sealed `when` stays exhaustive on the deserialise side too.
+ */
+object DownloadConfigJson {
+
+    private val compact: Gson = GsonBuilder()
+        .registerTypeAdapter(StorageChoice::class.java, StorageChoiceAdapter)
+        .create()
+
+    private val pretty: Gson = GsonBuilder()
+        .setPrettyPrinting()
+        .registerTypeAdapter(StorageChoice::class.java, StorageChoiceAdapter)
+        .create()
+
+    /** Compact form — used by [DownloadConfigStore] to save space in MMKV. */
+    fun toJson(config: DownloadConfig): String = compact.toJson(config)
+
+    /** Human-readable form — used only for explicit import/export UI. */
+    fun toPrettyJson(config: DownloadConfig): String = pretty.toJson(config)
+
+    fun fromJson(json: String): DownloadConfig {
+        val parsed = compact.fromJson(json, DownloadConfig::class.java)
+        // 前向兼容：更新的版本可能已往 perBucket 写入本版本不认识的 Bucket 名，
+        // Gson 会把未知枚举键反序列化成 null —— 下游 mapValues/copy 一碰就 NPE
+        // （applyGlobalStorage 在带 NovelSeries 配置的旧 base 构建上真炸过）。
+        // 读入时直接丢弃未知桶 / null 桶配置，让老版本按「没配置过」回退到 defaults。
+        @Suppress("SENSELESS_COMPARISON", "USELESS_CAST")
+        val known = parsed.perBucket.filterKeys { it != null }.filterValues { it != null }
+        val sanitized = known.mapValues { (bucket, bc) ->
+            if (bucket == Bucket.Backup && bc.template != null &&
+                (bc.template.contains("{ext}") || !bc.template.endsWith(".json"))
+            ) {
+                bc.copy(template = DefaultTemplates.BACKUP)
+            } else {
+                bc
+            }
+        }
+        val changed = known.size != parsed.perBucket.size || sanitized != known
+        return if (changed) parsed.copy(perBucket = sanitized) else parsed
+    }
+
+    private object StorageChoiceAdapter : JsonSerializer<StorageChoice>, JsonDeserializer<StorageChoice> {
+
+        override fun serialize(
+            src: StorageChoice,
+            typeOfSrc: Type,
+            context: JsonSerializationContext,
+        ): JsonElement {
+            val obj = JsonObject()
+            when (src) {
+                is StorageChoice.MediaStore -> {
+                    obj.addProperty("kind", "media_store")
+                    obj.addProperty("collection", src.collection.name)
+                }
+                is StorageChoice.Saf -> {
+                    obj.addProperty("kind", "saf")
+                    obj.addProperty("tree_uri", src.treeUri.toString())
+                }
+                StorageChoice.AppCache -> {
+                    obj.addProperty("kind", "app_cache")
+                }
+            }
+            return obj
+        }
+
+        override fun deserialize(
+            json: JsonElement,
+            typeOfT: Type,
+            context: JsonDeserializationContext,
+        ): StorageChoice {
+            val obj = json.asJsonObject
+            return when (val kind = obj.get("kind").asString) {
+                "media_store" -> StorageChoice.MediaStore(
+                    collection = StorageChoice.MediaStore.Collection.valueOf(obj.get("collection").asString),
+                )
+                "saf" -> StorageChoice.Saf(Uri.parse(obj.get("tree_uri").asString))
+                "app_cache" -> StorageChoice.AppCache
+                else -> error("Unknown StorageChoice kind '$kind'")
+            }
+        }
+    }
+
+}

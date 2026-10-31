@@ -1,0 +1,43 @@
+apply plugin: 'com.android.library'
+
+android {
+    compileSdk 36
+
+    defaultConfig {
+        minSdkVersion 24
+        targetSdkVersion 36
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    namespace = 'ceui.pixiv.progress'
+}
+
+kotlin {
+    // 库模块：强制显式 public/internal + 显式返回类型，避免把实现细节顺手暴露成 API。
+    explicitApi()
+}
+
+dependencies {
+    // ── api：类型长在本模块的公开 API 上，消费方不声明也要能编过 ──────────────
+    // ProgressTracker.interceptor 是 okhttp3.Interceptor，install() 收 OkHttpClient.Builder。
+    api libs.okhttp
+
+    testImplementation libs.junit4
+    testImplementation libs.mockWebServer
+
+    // 刻意不引：coroutines / timber / android.os.Handler / :models / 任何 pixiv 代码。
+    // 本模块只认识「一条 URL 上正在流过多少字节」；回调在哪个线程消费、怎么落到 UI，
+    // 全是消费方的事（见 app 的 imageloader）。零 Android 依赖，单测在纯 JVM 上跑。
+}

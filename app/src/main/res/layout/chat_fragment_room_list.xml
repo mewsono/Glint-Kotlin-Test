@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 会话列表(聊天室主页) —— V3 重设计。
+     · v3_bg 背景 + 全 app 统一的品牌色 toolbar(chat_layout_toolbar,标题「聊天室」+ 会话数副标题)。
+     · 内容为纯 RecyclerView(hero 公屏卡 + 私信行两种 viewType)，不再套 StateLayout —
+       该 fragment 从不 setState，StateLayout 只会引入对 M3 主题的依赖。
+     · recycler 底 padding 走 window inset(BaseActivity 是 edge-to-edge)。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/v3_bg"
+    android:orientation="vertical">
+
+    <!-- 全 app 统一 toolbar(同 toolbar_layout.xml 形态,聊天室版多一行副标题 = 会话数)。
+         品牌色 + 状态栏 inset 由 NavExt.setupToolbar 在运行时设。 -->
+    <!-- include 不带 id:带了会盖掉根 Toolbar 的 @id/toolbar,setupToolbar 就找不到它了。 -->
+    <include layout="@layout/chat_layout_toolbar" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:overScrollMode="never"
+        android:paddingTop="4dp"
+        android:paddingBottom="8dp" />
+
+</LinearLayout>

@@ -1,0 +1,74 @@
+apply plugin: 'com.android.library'
+apply plugin: 'com.google.devtools.ksp'
+
+android {
+    compileSdk 36
+
+    defaultConfig {
+        minSdkVersion 24
+        targetSdkVersion 36
+        consumerProguardFiles 'consumer-rules.pro'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+
+    sourceSets {
+        // MigrationTestHelper 要在设备上读到导出的 schema JSON 才能建旧版库并校验新版。
+        androidTest.assets.srcDirs += files("$projectDir/schemas")
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    namespace = 'ceui.pixiv.actionqueue'
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+}
+
+kotlin {
+    // 库模块：强制显式 public/internal + 显式返回类型。少了它，重构时很容易把本该
+    // internal 的实现细节顺手暴露成 API，之后再收回来就是破坏性变更。
+    explicitApi()
+}
+
+ksp {
+    // 队列里躺的是用户还没生效的收藏/关注，销毁式迁移会静默吞掉它们，所以这个库
+    // 不允许 fallbackToDestructiveMigration，必须手写 Migration —— 而手写 Migration
+    // 的前提是 schema JSON 有导出并入库。
+    arg('room.schemaLocation', "$projectDir/schemas")
+}
+
+dependencies {
+    implementation libs.androidxRoomRuntime
+    implementation libs.androidxRoomKtx
+    ksp libs.androidxRoomCompiler
+
+    // :app 没有显式声明 coroutines（靠 lifecycle-ktx 传递引入 1.10.2）。本模块不依赖
+    // lifecycle，必须自己声明，版本对齐 :app 传递解析出的结果，避免两个版本并存。
+    //
+    // 是 api 不是 implementation：coroutines 的类型长在本模块的**公开 API** 上
+    // （events: SharedFlow / state: StateFlow / 一票 suspend 函数）。用 implementation 的话
+    // 消费方必须自己另外声明才编得过 —— 现在 :app 恰好能编过纯属沾了 lifecycle-ktx 传递引入的光。
+    api libs.coroutinesAndroid
+
+    testImplementation libs.junit4
+    testImplementation libs.coroutinesTest
+
+    // 手写 Migration 只有跑一遍真 SQLite 才知道对不对：Room 会逐字校验列和索引定义，
+    // 少一个索引、类型写错都是启动时 IllegalStateException，而队列里躺的是用户的收藏。
+    androidTestImplementation libs.androidxRoomTesting
+    androidTestImplementation libs.androidxTestJunit
+    androidTestImplementation libs.androidxTestRunner
+
+    // 刻意不引：retrofit / okhttp / gson / :models / 任何 pixiv 代码。
+    // 本模块不认识「收藏」，只认识「一个带 type 的 payload 字符串和一个执行器」。
+}

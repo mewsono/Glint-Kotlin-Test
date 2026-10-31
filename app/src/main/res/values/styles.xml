@@ -1,0 +1,796 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        Base application theme.
+
+        parent 从 QMUI.Compat.NoActionBar 换成 AppCompat 自己的 DayNight.NoActionBar
+        （QMUI 那条链的根本来就是 Theme.AppCompat.DayNight，所以这里只是把中间那两层摘掉）。
+
+        摘掉的两层里，QMUI 在无人察觉的情况下供了一批全局属性，删依赖后必须显式接管，
+        否则不会编译报错、只会某个页面在某个模式下颜色不对。下面按「保住」和「有意放手」
+        两组分开写，每条都注明它原来是什么。
+    -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#686bdd</item>
+        <item name="colorPrimaryDark">#4749a0</item>
+        <item name="colorControlActivated">?attr/colorPrimary</item>
+        <item name="colorSwitchThumbNormal">#F1F1F1</item>
+        <!-- 布局里的 RecyclerView 统一带「滑到边缘轻震」（#1193），见 ShaftViewInflater -->
+        <item name="viewInflaterClass">ceui.pixiv.widgets.ShaftViewInflater</item>
+
+        <!-- ↓ 原本由 QMUI 的 AppConfigTheme 供给，逐条接管，取值与它一致 ↓ -->
+
+        <!-- 原 ?attr/qmui_config_color_blue。MaterialEditText 等直接吃 colorAccent，
+             先原样保住；要不要改成跟主题色走是另一件事，不混在这个 commit 里。 -->
+        <item name="colorAccent">#1B88EE</item>
+        <!-- 原 @color/qmui_config_color_white。全仓 34 个 drawable 用
+             android:tint="?attr/colorControlNormal" 画工具栏 / 操作栏图标，白色是承重的：
+             交给 AppCompat DayNight 会变成深灰，浅色模式下图标直接消失在主题色工具栏上。 -->
+        <item name="colorControlNormal">#ffffff</item>
+        <!-- 原 ?attr/qmui_config_color_black。 -->
+        <item name="android:navigationBarColor">#212832</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <!-- 原 @color/qmui_config_color_white，且 QMUI 没有 values-night —— 夜间冷启动那下
+             白闪就是它。换成 v3_bg（#FAFAFA / #08080C），日间几乎看不出差别，夜间白闪消失。 -->
+        <item name="android:windowBackground">@color/v3_bg</item>
+        <!-- 长按选中文字的高亮底色（#973）。原来是绕道 QMUI 的
+             qmui_skin_support_color_background_pressed 交给 TextView.Compat 的，
+             现在直接写在主题级的 android:textColorHighlight 上，少一层间接。 -->
+        <item name="android:textColorHighlight">@color/text_selection_highlight</item>
+        <!-- 原 Button.Compat / ImageButton.Compat。前者管 20 个布局里 <Button> 的
+             textAllCaps=false（丢了全变大写），后者管 19 个布局里 <ImageButton> 的透明底
+             （丢了每个都会长出 AppCompat 的方框按钮底）。 -->
+        <item name="android:buttonStyle">@style/Widget.Shaft.Button</item>
+        <item name="buttonStyle">@style/Widget.Shaft.Button</item>
+        <item name="android:imageButtonStyle">@style/Widget.Shaft.ImageButton</item>
+        <item name="imageButtonStyle">@style/Widget.Shaft.ImageButton</item>
+
+        <!-- ↓ 有意不接管的，全是 QMUI 塞进来的「只有浅色值」的硬编码颜色 ↓
+             android:textColorPrimary / textColorSecondary  原本都是 #1B88EE（QMUI 品牌蓝），
+               现在交回 DayNight。可见变化只有两处状态文案（列表加载失败、空态提示）由蓝变灰，
+               那本来就该是次级灰。
+             android:editTextColor + EditText.Compat        原本钉死 #212832 / #353C46，夜间深字压深底。
+             TextView.Compat(QMUITextAppearance)            原本把所有未指定颜色的 TextView 钉成 #212832，同上。
+             ListView/GridView/AutoCompleteTextView/listDivider  全仓 0 处使用，直接丢弃。 -->
+
+        <item name="android:windowContentTransitions">true</item>
+        <item name="android:windowAllowEnterTransitionOverlap">true</item>
+        <item name="android:windowAllowReturnTransitionOverlap">true</item>
+        <item name="android:statusBarColor" tools:targetApi="l">@android:color/transparent</item>
+    </style>
+
+    <!-- 只为接住 QMUI 走后留下的两个缺口，没有别的用意，见 AppTheme 里的注释。 -->
+    <style name="Widget.Shaft.Button" parent="Widget.AppCompat.Button">
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Widget.Shaft.ImageButton" parent="Widget.AppCompat.ImageButton">
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+
+    <style name="ComicSheetSection">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:layout_marginBottom">4dp</item>
+        <item name="android:textColor">@color/rank_text_color</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="PixivBottomSheetStyle" parent="Widget.Design.BottomSheet.Modal">
+    </style>
+
+    <style name="ThemeOverlay.App.BottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/PixivBottomSheetStyle</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor" tools:ignore="NewApi">@android:color/transparent</item>
+    </style>
+
+    <!-- V3 系列 sheet 专用：开启 edgeToEdge，让 sheet 背景覆盖到 gesture nav 区域，
+         避免「sheet 底部和系统栏之间露出 scrim」的视觉空隙。
+         [ceui.pixiv.ui.search.v3.V3BottomSheetBase] 在 onStart 里再把 Material 给
+         design_bottom_sheet 装的 inset listener 摘掉——content 的 nav bar padding
+         由 V3 sheet 自己在 root 上做，统一一处。 -->
+    <style name="ThemeOverlay.V3.BottomSheetDialog" parent="ThemeOverlay.App.BottomSheetDialog">
+        <item name="enableEdgeToEdge">true</item>
+    </style>
+
+    <!-- reader / novel / comic 的下载·导出·设置类 sheet 共用:开启 edgeToEdge,让 dialog
+         window 画到手势导航栏底下。配合各 sheet 的 letDrawBehindNavBar()(清掉 Material 给
+         design_bottom_sheet 垫的 nav inset padding),sheet 内容背景就能一路延伸进底部 safe
+         area,消除底部露出后面页面的空隙。
+         注意 parent 必须是 ThemeOverlay.App.BottomSheetDialog(它的 bottomSheetStyle 走老 design
+         库的 Widget.Design.BottomSheet.Modal)。若 parent 用 ThemeOverlay.Material3.BottomSheetDialog,
+         其默认 Widget.Material3.BottomSheet.Modal 的 BottomSheetBehavior 会去读本 App 主题里
+         缺失的 Material3 motion 属性,inflate 直接崩(design_bottom_sheet_dialog line #47)。
+         与 ThemeOverlay.V3.BottomSheetDialog 等价,只是命名更中性、给非 V3 包复用。 -->
+    <style name="ThemeOverlay.App.BottomSheetDialog.EdgeToEdge" parent="ThemeOverlay.App.BottomSheetDialog">
+        <item name="enableEdgeToEdge">true</item>
+    </style>
+
+    <style name="UpdateBottomSheetStyle" parent="Widget.Design.BottomSheet.Modal">
+        <item name="android:background">@drawable/bg_update_bottom_sheet</item>
+    </style>
+
+    <style name="Theme.Update.BottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/UpdateBottomSheetStyle</item>
+    </style>
+
+
+
+    <style name="AppTheme.Default" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#686bdd</item>
+        <item name="colorPrimaryDark">#4749a0</item>
+    </style>
+
+    <style name="AppTheme.Index0" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#686bdd</item>
+        <item name="colorPrimaryDark">#4749a0</item>
+    </style>
+
+    <style name="AppTheme.Index1" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#56baec</item>
+        <item name="colorPrimaryDark">#4ba2ce</item>
+    </style>
+
+    <style name="AppTheme.Index2" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#008BF3</item>
+        <item name="colorPrimaryDark">#0277cf</item>
+    </style>
+
+    <style name="AppTheme.Index3" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#03d0bf</item>
+        <item name="colorPrimaryDark">#04a598</item>
+    </style>
+
+    <style name="AppTheme.Index4" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#fee65e</item>
+        <item name="colorPrimaryDark">#dbc650</item>
+    </style>
+
+    <style name="AppTheme.Index5" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#fe83a2</item>
+        <item name="colorPrimaryDark">#d67089</item>
+    </style>
+
+
+    <style name="AppTheme.Index6" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#F44336</item>
+        <item name="colorPrimaryDark">#D32F2F</item>
+    </style>
+
+    <style name="AppTheme.Index7" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#673AB7</item>
+        <item name="colorPrimaryDark">#512DA8</item>
+    </style>
+
+    <style name="AppTheme.Index8" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#4CAF50</item>
+        <item name="colorPrimaryDark">#689F38</item>
+    </style>
+
+    <style name="AppTheme.Index9" parent="AppTheme">
+        <!-- Customize your theme here. -->
+        <item name="colorPrimary">#E91E63</item>
+        <item name="colorPrimaryDark">#C2185B</item>
+    </style>
+
+    <!--
+      自定义主题色档（issue #1014）。和上面十个预设的唯一区别：colorPrimary 不写字面量，
+      指向两个可被运行时覆盖的 color 资源。覆盖动作在 setTheme 之前由
+      [ceui.pixiv.ui.settings.CustomThemeColor.applyResourceOverride] 做（API 30+）。
+    -->
+    <style name="AppTheme.Custom" parent="AppTheme">
+        <item name="colorPrimary">@color/custom_theme_primary</item>
+        <item name="colorPrimaryDark">@color/custom_theme_primary_dark</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <style name="AppTheme.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar">
+        <item name="actionOverflowButtonStyle">@style/AppTheme.OverflowButtonStyle</item>
+    </style>
+
+    <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.AppCompat.DayNight">
+        <item name="android:background">@color/fragment_center</item>
+    </style>
+
+    <style name="AppTheme.OverflowButtonStyle" parent="Widget.AppCompat.ActionButton.Overflow">
+        <item name="android:src">@drawable/ic_more</item>
+    </style>
+
+    <style name="shadowText">
+        <item name="android:shadowColor">#FF666666</item>
+        <item name="android:shadowDx">3.5</item>
+        <item name="android:shadowDy">3.5</item>
+        <item name="android:shadowRadius">3.5</item>
+    </style>
+
+    <style name="FullscreenTheme" parent="AppTheme">
+        <item name="android:actionBarStyle">@style/FullscreenActionBarStyle</item>
+        <item name="android:windowActionBarOverlay">true</item>
+        <item name="android:windowBackground">@null</item>
+        <item name="metaButtonBarStyle">?android:attr/buttonBarStyle</item>
+        <item name="metaButtonBarButtonStyle">?android:attr/buttonBarButtonStyle</item>
+    </style>
+
+    <style name="FullscreenActionBarStyle" parent="Widget.AppCompat.ActionBar">
+        <item name="android:background">@color/black_overlay</item>
+    </style>
+
+
+    <style name="My_CheckBox" parent="@android:style/Widget.Material.CompoundButton.CheckBox">
+        <item name="android:colorControlActivated">?attr/colorPrimary</item>
+        <item name="android:colorControlNormal">?attr/colorPrimaryDark</item>
+    </style>
+
+    <style name="dialog_animation_scale" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/zoom_enter</item>
+        <item name="android:windowExitAnimation">@anim/zoom_exit</item>
+    </style>
+
+
+
+    <style name="dialog_animation" parent="@android:style/Animation.Dialog">
+        <item name="android:windowEnterAnimation">@anim/dialog_enter_anim</item>
+        <item name="android:windowExitAnimation">@anim/dialog_exit_anim</item>
+    </style>
+
+
+    <style name="setting_text_left_and_center" parent="setting_text_left">
+        <item name="android:layout_centerVertical">true</item>
+    </style>
+
+    <style name="setting_text_left">
+        <item name="android:textColor">@color/black_to_grey</item>
+        <item name="android:layout_marginStart">@dimen/sixteen_dp</item>
+        <item name="android:layout_marginTop">@dimen/twelve_dp</item>
+        <item name="android:layout_marginBottom">@dimen/twelve_dp</item>
+        <item name="android:layout_marginEnd">@dimen/eighty_dp</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+    </style>
+
+    <style name="setting_text_head">
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:layout_marginStart">@dimen/sixteen_dp</item>
+        <item name="android:layout_marginTop">30dp</item>
+        <item name="android:layout_marginBottom">@dimen/eight_dp</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+    </style>
+
+    <style name="setting_right_arrow">
+        <item name="android:layout_marginEnd">@dimen/sixteen_dp</item>
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_centerVertical">true</item>
+        <item name="android:layout_alignParentEnd">true</item>
+        <item name="android:drawableEnd">@drawable/ic_arrow_right</item>
+        <item name="android:drawablePadding">@dimen/six_dp</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="setting_right_switch">
+        <item name="android:layout_marginEnd">@dimen/sixteen_dp</item>
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_centerVertical">true</item>
+        <item name="android:layout_alignParentEnd">true</item>
+        <item name="android:checked">true</item>
+        <item name="android:colorForeground">#434343</item>
+    </style>
+
+    <style name="full_divider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">0.5dp</item>
+        <item name="android:background">@color/settings_divider</item>
+    </style>
+
+    <style name="half_divider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_marginStart">@dimen/sixteen_dp</item>
+        <item name="android:layout_height">0.5dp</item>
+        <item name="android:background">@color/settings_divider</item>
+    </style>
+
+    <style name="ripple_rela">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">70dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:background">?android:attr/selectableItemBackground</item>
+    </style>
+
+    <style name="BarTheme">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/white</item>
+    </style>
+
+
+    <style name="AboutUserLeft">
+        <item name="android:layout_width">80dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_margin">@dimen/sixteen_dp</item>
+        <item name="android:textColor">@color/about_user_left</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="AboutUserRight">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:background">@color/trans</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">@dimen/sixteen_dp</item>
+        <item name="android:layout_marginEnd">@dimen/sixteen_dp</item>
+        <item name="android:layout_marginBottom">@dimen/sixteen_dp</item>
+        <item name="android:textColor">@color/about_user_right</item>
+        <item name="android:textColorHint">@color/about_user_right</item>
+        <item name="android:autoLink">all</item>
+        <item name="android:textColorLink">?attr/colorPrimary</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="AboutUserRightDarkText" parent="AboutUserRight">
+        <item name="android:textColor">@color/about_user_left</item>
+    </style>
+
+    <style name="LinearVertical">
+        <item name="android:orientation">vertical</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+    </style>
+
+    <style name="LinearHorizon">
+        <item name="android:orientation">horizontal</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+    </style>
+
+    <declare-styleable name="ProgressTextButton">
+        <attr name="ptb_progress_width" format="dimension" />
+        <attr name="ptb_progress_stroke_width" format="dimension" />
+    </declare-styleable>
+
+    <declare-styleable name="ProgressImageButton">
+        <attr name="pib_progress_width" format="dimension" />
+        <attr name="pib_progress_stroke_width" format="dimension" />
+    </declare-styleable>
+
+    <style name="GreenShiningButton">
+        <item name="android:textColor">@color/buttonTextGreen</item>
+        <item name="android:shadowColor">@color/green_shadow_color</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">2</item>
+        <item name="android:shadowRadius">10</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:background">@drawable/round_corner_shining_btn_green</item>
+        <item name="android:stateListAnimator">@animator/button_press_alpha</item>
+    </style>
+
+    <style name="BlueShiningButton">
+        <item name="android:textColor">@color/buttonTextBlue</item>
+        <item name="android:shadowColor">@color/blue_shadow_color</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">2</item>
+        <item name="android:shadowRadius">10</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:background">@drawable/round_corner_shining_btn_blue</item>
+        <item name="android:stateListAnimator">@animator/button_press_alpha</item>
+    </style>
+
+    <style name="RedShiningButton">
+        <item name="android:textColor">@color/buttonTextRed</item>
+        <item name="android:shadowColor">@color/red_shadow_color</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">2</item>
+        <item name="android:shadowRadius">10</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:background">@drawable/round_corner_shining_btn_red</item>
+        <item name="android:stateListAnimator">@animator/button_press_alpha</item>
+    </style>
+
+    <!--
+        字族同时写 app 命名空间的 fontFamily 和框架命名空间的 android:fontFamily：
+        前者只有 AppCompatTextView 会解析（AppCompatTextHelper 读 TextAppearance_fontFamily），
+        后者任何 TextView 都认。布局 inflate 出来的 TextView 会被 AppCompat 换成
+        AppCompatTextView，两者等价；但代码里 new 的框架 TextView 再 setTextAppearance
+        （如 NovelHeaderSettings / DownloadPathSettings 的分节标题）只认后者，只写前者会
+        静默退回系统字。RequestDetail* 与 web_discovery_styles 也是同一个原因写了 android:fontFamily。
+    -->
+    <style name="textMontserratRegular">
+        <item name="fontFamily">@font/montserrat_regular</item>
+        <item name="android:fontFamily">@font/montserrat_regular</item>
+    </style>
+
+    <style name="textMontserratBold">
+        <item name="fontFamily">@font/montserrat_bold</item>
+        <item name="android:fontFamily">@font/montserrat_bold</item>
+    </style>
+
+    <style name="textBlack">
+        <item name="fontFamily">@font/montserrat_extra_bold</item>
+        <item name="android:fontFamily">@font/montserrat_extra_bold</item>
+    </style>
+
+    <style name="textMontserratMedium">
+        <item name="fontFamily">@font/montserrat_medium</item>
+        <item name="android:fontFamily">@font/montserrat_medium</item>
+    </style>
+
+    <style name="textMontserratSemiBold">
+        <item name="fontFamily">@font/montserrat_semi_bold</item>
+        <item name="android:fontFamily">@font/montserrat_semi_bold</item>
+    </style>
+
+    <style name="textMontserratExtraBold">
+        <item name="fontFamily">@font/montserrat_extra_bold</item>
+        <item name="android:fontFamily">@font/montserrat_extra_bold</item>
+    </style>
+
+    <!-- ── 约稿方案详情页 (MD3-E) 分节样式;动态色(卡底/描边/强调)由 Fragment 用 V3Palette 注入 ── -->
+    <style name="RequestDetailCard">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:padding">18dp</item>
+    </style>
+
+    <style name="RequestDetailSectionLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:fontFamily">@font/montserrat_semi_bold</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:letterSpacing">0.06</item>
+        <item name="android:textColor">@color/v3_text_3</item>
+    </style>
+
+    <style name="RequestDetailBody">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:fontFamily">@font/montserrat_regular</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:lineSpacingExtra">3dp</item>
+        <item name="android:textColor">@color/v3_text_2</item>
+        <item name="android:textIsSelectable">true</item>
+    </style>
+
+    <style name="RequestDetailOrigTag">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:fontFamily">@font/montserrat_semi_bold</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:letterSpacing">0.04</item>
+        <item name="android:textColor">@color/v3_text_3</item>
+    </style>
+
+    <style name="RequestDetailMetaKey">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:fontFamily">@font/montserrat_medium</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/v3_text_2</item>
+    </style>
+
+    <style name="RequestDetailMetaValue">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:fontFamily">@font/montserrat_semi_bold</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/v3_text_1</item>
+    </style>
+
+    <!-- 日间开屏：蓝底 + 白蜗牛。夜间版在 values-night/styles.xml —— 深色模式下 ROM 会把启动窗口里的
+         亮色内容转暗（白蜗牛会被翻成纯黑），所以夜间换成深底 + 品牌蓝蜗牛，原因写在那边。 -->
+    <style name="SplashTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!--        <item name="android:windowSplashScreenBrandingImage" tools:targetApi="s">-->
+        <!--            @drawable/splash_text-->
+        <!--        </item>-->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/icon_shaft_with_bg</item>
+        <item name="windowSplashScreenAnimationDuration">200</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+    </style>
+
+    <!-- 大图查看页(ImageDetailActivity):透明窗口,一级详情留在身后可见,黑底/展开/下拉收起
+         全部自绘,做成小红书式「全屏弹窗」观感。「窗口透明(能看见身后 Activity)」这件事由系统
+         在启动时读 manifest 主题决定,所以必须声明在 manifest 上;运行期 BaseActivity.updateTheme
+         会按用户主题色重新 setTheme,窗口属性由 ImageViewerWindowOverlay 补回。 -->
+    <style name="ImageViewerTheme" parent="AppTheme">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <!-- 叠在任意用户主题色 AppTheme_IndexN 之上的窗口透明属性,见 ImageDetailActivity.setTheme -->
+    <style name="ImageViewerWindowOverlay" parent="">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <style name="SlideshowTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+
+
+    <declare-styleable name="SlidingCursorView">
+        <attr name="scv_cursor_height" format="dimension" />
+        <attr name="scv_cursor_width" format="dimension" />
+        <attr name="scv_cursor_color" format="color" />
+    </declare-styleable>
+
+    <style name="TransparentDialogTheme" parent="Theme.AppCompat.Dialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <style
+        name="dialog_animation_fade" >
+        <item name="android:windowEnterAnimation">@anim/dialog_enter_anim</item>
+        <item name="android:windowExitAnimation">@anim/dialog_exit_anim</item>
+    </style>
+
+    <!-- 所有用到下面这些 ShapeAppearance 的 ShapeableImageView 都不画描边：布局里一律显式
+         app:strokeColor="@android:color/transparent"，新增 ShapeableImageView 也照此写。
+         material 的 Widget.MaterialComponents.ShapeableImageView 默认把 strokeColor 指向
+         @color/material_on_surface_stroke，而它里面是 ?attr/colorOnSurface；本 App 主题是
+         AppCompat 系、没有这个 Material 属性，于是每次 inflate 都会在 ResourcesCompat 里抛
+         UnsupportedOperationException 并打一条 "Failed to inflate ColorStateList" WARN。
+         显式透明色不改观感（strokeWidth 恒为 0，drawStroke 本来就不画），只是不再解析那个属性。 -->
+
+    <!-- "下载管理" 三 tab 缩略图圆角 —— ShapeableImageView 的 shapeAppearanceOverlay：
+         空 parent 让所有四角都用同一个 cornerSize；不影响外层 CardView 的圆角。 -->
+    <style name="ShapeAppearance.V3DownloadThumb" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">10dp</item>
+    </style>
+
+    <!-- 精华卡片的预览缩略图：比 V3DownloadThumb 大一档，配 bg_v3_card 的 28dp 外圆角。 -->
+    <style name="ShapeAppearance.V3FeatureThumb" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">12dp</item>
+    </style>
+
+    <!-- cell_series_v3 的封面:84x112 竖图,16dp 比 V3FeatureThumb 更圆一档,呼应卡底 28dp。 -->
+    <style name="ShapeAppearance.V3SeriesCover" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">16dp</item>
+    </style>
+
+    <!-- 小说详情页可复制信息 chip：扁平浅灰胶囊，点击复制对应字段。 -->
+    <style name="NovelInfoChip" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginEnd">6dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:background">@drawable/bg_v3_chip</item>
+        <item name="android:paddingStart">10dp</item>
+        <item name="android:paddingEnd">10dp</item>
+        <item name="android:paddingTop">4dp</item>
+        <item name="android:paddingBottom">4dp</item>
+        <item name="android:textColor">@color/text00</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:visibility">gone</item>
+    </style>
+
+    <!-- Chat subsystem (borrowed from Peanut; see ceui.pixiv.chat.*). -->
+    <style name="ShapeAppearance.Chat.Avatar" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
+
+    <style name="ShapeAppearance.Chat.Bubble.Sent" parent="ShapeAppearance.Material3.SmallComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">20dp</item>
+        <item name="cornerSizeTopRight">20dp</item>
+        <item name="cornerSizeBottomLeft">20dp</item>
+        <item name="cornerSizeBottomRight">4dp</item>
+    </style>
+
+    <style name="ShapeAppearance.Chat.Bubble.Received" parent="ShapeAppearance.Material3.SmallComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">20dp</item>
+        <item name="cornerSizeTopRight">20dp</item>
+        <item name="cornerSizeBottomLeft">4dp</item>
+        <item name="cornerSizeBottomRight">20dp</item>
+    </style>
+
+    <!--
+      站长推荐 score pill。封面左上叠层,金渐变背景 + 琥珀金字 + 黑 shadow。
+      默认 visibility=gone,只有 trending repo 把 score 注入到 bean 时才显示。
+      插画卡(IllustStaggerRenderer)与小说卡(NovelFeedFragment 的 renderer)共用,与现有 tag_stroke 风格
+      刻意区分以表明语义不同。
+    -->
+    <style name="TrendingScorePill">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/bg_trending_score_pill</item>
+        <item name="android:paddingStart">6dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:paddingTop">2dp</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:textColor">@color/trending_score_amber</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:shadowColor">#000000</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">2</item>
+        <item name="android:visibility">gone</item>
+    </style>
+
+    <!-- ── MD3-E 设置页 ─────────────────────────────────────────── -->
+
+    <!-- 分段分组里的一行（背景按位置用 wit_row_top/mid/bottom/single） -->
+    <style name="M3SetRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:minHeight">60dp</item>
+        <item name="android:paddingStart">18dp</item>
+        <item name="android:paddingEnd">18dp</item>
+        <item name="android:paddingTop">13dp</item>
+        <item name="android:paddingBottom">13dp</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <!-- 行内文字列（标题+描述），给右侧开关/值留出空间。
+         72dp = 开关实测宽度 64dp（SwitchCompat 取 2×thumb 固有宽 32dp，比 track 声明的 52dp 宽）+ 8dp 间隙。 -->
+    <style name="M3SetTexts">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_centerVertical">true</item>
+        <item name="android:layout_marginEnd">72dp</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+
+    <style name="M3SetTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/v3_text_1</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="M3SetDesc">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">3dp</item>
+        <item name="android:textColor">@color/v3_text_2</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <!-- 右侧当前值（可点行的 value 文本） -->
+    <style name="M3SetValue">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_alignParentEnd">true</item>
+        <item name="android:layout_centerVertical">true</item>
+        <item name="android:maxWidth">150dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <!-- 右侧箭头（导航行），可带状态文字 -->
+    <style name="M3SetArrow" parent="M3SetValue">
+        <item name="android:drawableEnd">@drawable/ic_arrow_right</item>
+        <item name="android:drawablePadding">@dimen/six_dp</item>
+    </style>
+
+    <!-- MD3 风格开关 -->
+    <style name="M3SetSwitch">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_alignParentEnd">true</item>
+        <item name="android:layout_centerVertical">true</item>
+        <item name="track">@drawable/m3_switch_track</item>
+        <item name="android:thumb">@drawable/m3_switch_thumb</item>
+        <item name="android:background">@null</item>
+    </style>
+
+    <!-- 分类页内的小节标题 -->
+    <style name="M3SetHeader">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">18dp</item>
+        <item name="android:layout_marginTop">22dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <!-- ── 账号操作 bottom sheet（sheet_account_actions.xml）的动作行 ────────── -->
+
+    <!-- MD3 list item：56dp 高，24dp 边距，leading icon + label -->
+    <style name="AccountActionRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">24dp</item>
+        <item name="android:paddingEnd">24dp</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="AccountActionIcon">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="tint">?attr/colorOnSurfaceVariant</item>
+    </style>
+
+    <style name="AccountActionLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">20dp</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyLarge</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+    </style>
+
+    <!-- MD3-E 阅读器滑块:主题色激活轨 + 竖胶囊手柄,轨道 6dp。 -->
+    <style name="Widget.Reader.Slider" parent="Widget.AppCompat.SeekBar">
+        <item name="android:progressDrawable">@drawable/reader_slider_progress</item>
+        <item name="android:thumb">@drawable/reader_slider_thumb</item>
+        <item name="android:splitTrack">false</item>
+        <item name="android:thumbOffset">0dp</item>
+        <item name="android:maxHeight">6dp</item>
+        <item name="android:minHeight">6dp</item>
+        <item name="android:paddingStart">3dp</item>
+        <item name="android:paddingEnd">3dp</item>
+    </style>
+
+    <!-- 分组卡内 inset 分割线(起始 18dp 内缩,与行内容对齐)。 -->
+    <style name="ReaderRowDivider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">0.5dp</item>
+        <item name="android:layout_marginStart">18dp</item>
+        <item name="android:background">@color/v3_border_2</item>
+    </style>
+
+</resources>
+
+

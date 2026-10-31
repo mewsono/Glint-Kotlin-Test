@@ -1,0 +1,419 @@
+import java.security.SecureRandom
+
+apply plugin: 'com.android.application'
+// AGP 9 内置 Kotlin 不再兼容 kotlin-kapt；Glide 编译器只有 kapt 版，走 AGP 自带的 legacy-kapt。
+apply plugin: 'com.android.legacy-kapt'
+apply plugin: 'kotlin-parcelize'
+// Hilt 处理器走 KSP（Glide/Room 仍在 kapt，两者在同一模块并存互不干扰）。
+apply plugin: 'com.google.devtools.ksp'
+apply plugin: 'com.google.dagger.hilt.android'
+// apply plugin: 'org.jmailen.kotlinter'  // 临时停用，见根 build.gradle
+
+// 官方包的 HMAC 密钥只在构建进程里读取，绝不生成进 BuildConfig/String 常量。
+// 任务输出三份随机掩码字节表；C++ 在签名调用期间恢复原始字节、完成 HMAC 后立即清零。
+// 这能阻止 strings/jadx 直接拿到明文，但客户端仍是不可信环境，不能替代服务端短期凭证。
+def shaftEventsHmacProvider = providers.gradleProperty('SHAFT_EVENTS_HMAC')
+        .orElse(providers.environmentVariable('SHAFT_EVENTS_HMAC'))
+        .orElse('')
+def generatedShaftSecretsDir = layout.buildDirectory.dir('generated/shaft-secrets')
+def generatedShaftSecretsHeader = generatedShaftSecretsDir.map {
+    it.file('shaft_secrets.generated.h')
+}
+
+def generateShaftSecretsHeader = tasks.register('generateShaftSecretsHeader') {
+    outputs.file(generatedShaftSecretsHeader)
+    // Never persist the secret (or a guessable derivative) in Gradle's task history. Regenerating
+    // also gives every build fresh masks, even when the injected key itself did not rotate.
+    outputs.upToDateWhen { false }
+
+    doLast {
+        byte[] secret = shaftEventsHmacProvider.get().getBytes('UTF-8')
+        int storageSize = secret.length > 0 ? secret.length : 1
+        byte[] maskA = new byte[storageSize]
+        byte[] maskB = new byte[storageSize]
+        byte[] encoded = new byte[storageSize]
+        def random = new SecureRandom()
+        random.nextBytes(maskA)
+        random.nextBytes(maskB)
+        for (int i = 0; i < storageSize; i++) {
+            int value = i < secret.length ? secret[i] & 0xff : random.nextInt(256)
+            encoded[i] = (byte) (value ^ (maskA[i] & 0xff) ^ (maskB[i] & 0xff))
+        }
+
+        // Integer.toString(int) is STATIC in Java, so Groovy's `(it & 0xff).toString(16)` resolves to
+        // Integer.toString(16) == "16" for every byte: all three tables came out as 0x16 and the
+        // signer keyed on 64 bytes of 0x16 — every X-Shaft-Sign since the native move was wrong.
+        def values = { byte[] bytes ->
+            bytes.collect { String.format('0x%02x', it & 0xff) }.join(', ')
+        }
+        def output = generatedShaftSecretsHeader.get().asFile
+        output.parentFile.mkdirs()
+        output.setText("""#pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+// Generated file. Contains only masked bytes; do not commit it.
+namespace shaft::generated {
+inline constexpr std::size_t kSecretSize = ${secret.length};
+inline constexpr std::size_t kStorageSize = ${storageSize};
+// Volatile reads prevent LTO/the optimizer from folding the three tables back into a contiguous
+// plaintext constant. The tables remain read-only and independently randomized per build.
+inline const volatile std::uint8_t kEncoded[kStorageSize] = { ${values(encoded)} };
+inline const volatile std::uint8_t kMaskA[kStorageSize] = { ${values(maskA)} };
+inline const volatile std::uint8_t kMaskB[kStorageSize] = { ${values(maskB)} };
+}  // namespace shaft::generated
+""", 'UTF-8')
+        output.setReadable(false, false)
+        output.setReadable(true, true)
+        output.setWritable(false, false)
+        output.setWritable(true, true)
+
+        [secret, maskA, maskB, encoded].each { bytes ->
+            for (int i = 0; i < bytes.length; i++) bytes[i] = 0
+        }
+    }
+}
+
+android {
+    compileSdk 36
+
+    // Default instrumentation stays fast, while release hardening can explicitly run the same
+    // tests against R8 output with -PSHAFT_TEST_BUILD_TYPE=release.
+    testBuildType = providers.gradleProperty('SHAFT_TEST_BUILD_TYPE').getOrElse('debug')
+
+    defaultConfig {
+        applicationId "ceui.pixiv"
+        minSdkVersion 24
+        targetSdkVersion 36
+        versionCode 43500
+        versionName "4.9.8"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            // Production remains arm64-only. CI can request x86_64 so instrumented tests run on
+            // GitHub's hardware-accelerated emulator without changing shipped APKs.
+            abiFilters providers.gradleProperty('SHAFT_TEST_ABI').getOrElse('arm64-v8a')
+        }
+
+        // Shaft community events server (shaft-api-v2). The URL is not secret.
+        // HMAC material is injected into libshaft_secrets.so by the task above;
+        // forks build with an empty native key and keep the historical disabled behavior.
+        buildConfigField "String", "SHAFT_EVENTS_BASE_URL",
+            '"' + (project.findProperty('SHAFT_EVENTS_BASE_URL') ?: 'http://36.138.103.18:30009') + '"'
+        externalNativeBuild {
+            cmake {
+                arguments "-DSHAFT_GENERATED_SECRET_DIR=${generatedShaftSecretsDir.get().asFile.absolutePath}"
+                cppFlags '-std=c++20', '-fvisibility=hidden', '-fvisibility-inlines-hidden',
+                        '-fstack-protector-strong', '-D_FORTIFY_SOURCE=2'
+            }
+        }
+    }
+
+    lint {
+        // minSdk 24 但 compileSdk 36：越版本调用编译期无感，只在老机器上炸成
+        // NoSuchMethodError（见 #953 CommentComposerView 的 requireViewById）。
+        // 所以 lint 必须能卡住构建 —— 存量问题进 baseline，新引入的错误才报警。
+        abortOnError = true
+        baseline = file('lint-baseline.xml')
+        fatal 'NewApi'
+    }
+
+    // 签名材料不进 git。来源按优先级：
+    //   1. 仓库根目录的 keystore.properties（gitignored，本机开发用）
+    //   2. 环境变量 SHAFT_KEYSTORE_*（CI 从 Secrets 注入，见 .github/workflows/gradle.yml）
+    //   3. 都没有 → fallback 到 Android 默认 debug 签名，外部贡献者 clone 即可构建
+    def ksProps = new Properties()
+    def ksPropsFile = rootProject.file("keystore.properties")
+    if (ksPropsFile.exists()) {
+        ksPropsFile.withInputStream { ksProps.load(it) }
+    }
+    def ksStoreFile = ksProps.getProperty("storeFile") ?: System.getenv("SHAFT_KEYSTORE_FILE")
+    def ksStorePassword = ksProps.getProperty("storePassword") ?: System.getenv("SHAFT_KEYSTORE_PASSWORD")
+    def ksKeyAlias = ksProps.getProperty("keyAlias") ?: System.getenv("SHAFT_KEY_ALIAS")
+    def ksKeyPassword = ksProps.getProperty("keyPassword") ?: System.getenv("SHAFT_KEY_PASSWORD")
+    def hasShaftKeystore = ksStoreFile != null && rootProject.file(ksStoreFile).exists()
+
+    signingConfigs {
+        if (hasShaftKeystore) {
+            shaft {
+                storeFile rootProject.file(ksStoreFile)
+                storePassword ksStorePassword
+                keyAlias ksKeyAlias
+                keyPassword ksKeyPassword
+            }
+        }
+    }
+
+    flavorDimensions += "channel"
+    productFlavors {
+        google {
+            dimension "channel"
+            buildConfigField "String", "UPDATE_CHANNEL", '"google"'
+            buildConfigField "boolean", "IS_LITE", "true"
+        }
+        github {
+            dimension "channel"
+            buildConfigField "String", "UPDATE_CHANNEL", '"github"'
+            buildConfigField "boolean", "IS_LITE", "false"
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+            buildConfigField "boolean", "IS_DEBUG_MODE", "true"
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // debug 也用正式 key（有的话）：跟历史行为一致，debug 包能覆盖安装旧 debug 包
+            signingConfig = hasShaftKeystore ? signingConfigs.shaft : signingConfigs.debug
+
+            applicationIdSuffix ".cshaft"
+            resValue "string", "app_name", "Shaft(Debug)"
+        }
+        release {
+            minifyEnabled true
+            shrinkResources = true
+            buildConfigField "boolean", "IS_DEBUG_MODE", "false"
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            testProguardFiles 'proguard-test-rules.pro'
+            signingConfig = hasShaftKeystore ? signingConfigs.shaft : signingConfigs.debug
+
+            applicationIdSuffix ".pshaft"
+            resValue "string", "app_name", "Shaft"
+        }
+    }
+
+    compileOptions {
+        coreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            //jni库的调用会到资源文件夹下libs里面找so文件
+            jniLibs.srcDirs = ['libs']
+        }
+        // MigrationTestHelper 在设备上从 assets 读取历史 schema，创建旧版数据库并校验迁移结果。
+        androidTest.assets.srcDirs += files("$projectDir/schemas")
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version = '3.22.1'
+        }
+    }
+
+    buildFeatures {
+        dataBinding = true
+        viewBinding = true
+        buildConfig = true // 启用 BuildConfig
+        resValues = true // AGP 9 起默认关闭；app_name / out_wake_label 靠 resValue 生成
+    }
+    testOptions {
+        unitTests.includeAndroidResources = true
+    }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += ['META-INF/MANIFEST.MF']
+        }
+    }
+    bundle {
+        abi {
+            // 只发 arm64 一个 ABI，拆 split 零收益；拆了之后 Play 包被人只转存 base.apk 侧载，
+            // 所有 .so 都随 split_config.arm64_v8a.apk 丢掉，MMKV 初始化直接启动崩溃。
+            enableSplit = false
+        }
+        language {
+            // App 内可自选语言，但 Play 只按系统语言下发语言 split；系统里没有英文的设备选了
+            // English 也拿不到 values-en，回落到默认 values/（简体中文）。全部语言打进 base。
+            enableSplit = false
+        }
+    }
+
+    namespace = 'ceui.lisa'
+}
+
+// 按 flavor + buildType 生成一个可区分的名字,给 OutWakeActivity(pixiv 链接的
+// 「打开方式」处理器)当 label —— 同时装了多个 build 时在系统选择器里能分清是哪个。
+// github 渠道=Shaft、google(Play)渠道=PixShaft(沿用现有产品名),debug 追加 " Debug"。
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def base = variant.flavorName == "google" ? "PixShaft" : "Shaft"
+        def label = variant.buildType == "debug" ? base + " Debug" : base
+        variant.resValues.put(variant.makeResValueKey("string", "out_wake_label"),
+                new com.android.build.api.variant.ResValue(label, null))
+    }
+}
+
+kapt {
+    // schema 是迁移测试的输入，也用于 code review；必须随版本一并提交。
+    // 不用 androidx.room 插件：它（截至 2.8.5）只认 KGP 的 kotlin-kapt，挂不上 AGP 9 内置 kapt，
+    // 参数静默丢失、schema 停止导出。同 :actionqueue 的 ksp arg 写法。
+    arguments {
+        arg('room.schemaLocation', "$projectDir/schemas")
+    }
+}
+
+// CMake compilation must never race the generated secret header, especially when Gradle
+// builds google/github variants in parallel.
+tasks.configureEach { task ->
+    def nativeBuildTask = task.name.contains('CMake') || task.name.startsWith('externalNativeBuild')
+    if (nativeBuildTask && !task.name.toLowerCase(Locale.ROOT).contains('clean')) {
+        task.dependsOn(generateShaftSecretsHeader)
+    }
+}
+
+// DateFormatPatternStringsTest 在运行时直接读 src/main/res 校验各 locale 的日期 pattern 字符串,
+// 但 res 不在单测任务的默认输入里——不声明的话,纯翻译改动会被 up-to-date 跳过,守门形同虚设。
+tasks.withType(Test).configureEach {
+    inputs.dir('src/main/res').withPathSensitivity(PathSensitivity.RELATIVE)
+    // Gradle 默认给测试进程 512m 堆。Robolectric SDK 35 沙箱一建起来常驻就 ~400m，
+    // 两百多个测试类跑下来静态缓存再涨 ~100m，到 512m 就 OOM（CI 自 6262091aa 起一直红）。
+    maxHeapSize = '2g'
+}
+
+dependencies {
+    testImplementation libs.junit4
+    // websocket 测试(来自上游 Peanut)需要的 mock server 与协程测试调度器;
+    // 版本分别对齐主依赖的 okhttp 4.12.0 / 传递解析出的 coroutines 1.10.2
+    testImplementation libs.mockWebServer
+    testImplementation libs.coroutinesTest
+    testImplementation libs.androidxLifecycleRuntimeTesting
+    testImplementation libs.androidxArchCoreTesting
+    testImplementation libs.robolectric
+    // JVM 单测里 android.jar 的 org.json 是 Stub!,真实现放前面顶掉(AiTranslator 测试用)
+    testImplementation libs.orgJson
+
+    // AndroidX Test - JUnit Runner
+    androidTestImplementation libs.androidxTestJunit
+    androidTestImplementation libs.androidxRoomTesting
+    androidTestImplementation libs.androidxTestRunner
+    // Release androidTest is minified independently from the target APK. Keep the runner's
+    // direct Trace dependency in the test APK so AndroidJUnitRunner can start under R8.
+    androidTestImplementation libs.androidxTracing
+
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+    implementation libs.androidxAppcompat
+    implementation libs.androidxConstraintLayout
+    implementation libs.androidxRecyclerView
+    implementation libs.androidxSwipeRefreshLayout
+    implementation libs.material
+    implementation libs.androidxLifecycleRuntime
+    implementation libs.coroutinesAndroid
+    implementation libs.androidxLifecycleLiveData
+    implementation libs.androidxLifecycleViewModel
+    implementation libs.androidxCore
+    // 原本由 navigation-fragment-ktx 传递引入,移除 Navigation 后需直接声明,
+    // 提供 Fragment.viewModels() / activityViewModels() 等 KTX 扩展。
+    implementation libs.androidxFragment
+
+    api libs.retrofit
+    api libs.retrofitGson
+
+    implementation libs.glide
+    implementation libs.glideOkhttp
+    kapt libs.glideCompiler
+
+    implementation libs.glideTransformations
+    implementation libs.circleImageView
+    implementation libs.androidxRoomRuntime
+    implementation libs.androidxRoomKtx
+    kapt libs.androidxRoomCompiler
+    implementation libs.hiltAndroid
+    ksp libs.hiltCompiler
+    implementation libs.agentwebCore
+    implementation libs.androidxWebkit
+    implementation libs.rebound
+    implementation libs.htmlTextView
+    implementation libs.materialDateTimePicker
+    implementation libs.flowingDrawer
+    // flowingdrawer-core declares these classes in its animation path but its published POM omits
+    // the dependency. Debug/D8 tolerated that; R8 correctly exposes the potential runtime crash.
+    implementation libs.nineOldAndroids
+    implementation libs.viewPagerTransforms
+    implementation(libs.utilCode) {
+        // 它在 POM 里带了 kotlin-android-extensions-runtime:1.3.72；Kotlin 2.2 起
+        // kotlin-parcelize-runtime 自带 kotlinx.android.parcel.*，两份同名类会撞 checkDuplicateClasses。
+        exclude group: 'org.jetbrains.kotlin', module: 'kotlin-android-extensions-runtime'
+    }
+
+    // Google Play In-App Review
+    implementation libs.googleReview
+
+    implementation libs.colorPicker
+    implementation libs.androidxSplashScreen
+    implementation libs.roundedImageView
+    // net.csdn.roundview.RoundImageView is inflated directly by comment/plaza XML layouts.
+    implementation libs.roundView
+    implementation libs.okhttp
+    // SSE 标准解析(AiTranslator 流式翻译):与 okhttp 同版本,按规范处理多行 data/CRLF/注释行
+    implementation libs.okhttpSse
+
+    // Cronet (Chromium 网络栈) 提供 QUIC/HTTP3 支持，绕过 GFW 的 TCP RST
+    implementation libs.cronet
+
+    implementation libs.lottie
+    implementation libs.hdImageView
+
+    implementation project(path: ':models')
+    // 列表框架（FeedSource / FeedViewModel / FeedFragment / FeedAdapter）。对 pixiv 一无所知，
+    // 宿主特有的东西由 ShaftFeedHost 在 Shaft.onCreate 注入，见 ceui.pixiv.feeds.host。
+    implementation project(path: ':feeds')
+    // WebSocket 客户端框架（RobustWebSocketClient / WebSocketManager / NetworkMonitor）。对 pixiv 一无所知，
+    // HMAC 签名与聊天报文模型在宿主 chat/api 侧，见 docs/ws-chat-integration.md。
+    implementation project(path: ':websocket')
+    // 应用内 banner 框架（BannerManager / BannerHostInstaller / 默认文字卡片）。对 pixiv 一无所知，
+    // 聊天报文 → banner 的桥接与 deep link 落地在宿主侧，见 ceui.pixiv.banner.host。
+    implementation project(path: ':banner')
+    // 底部面板编排（PanelHost / BottomPanelCoordinator / WindowSoftInputModeLease）。对 pixiv 一无所知，
+    // 只管键盘与面板互斥的高度动画，面板内容与草稿在宿主侧，见 ceui.pixiv.ui.comments。
+    implementation project(path: ':panel')
+    implementation project(path: ':progressmanager')
+    implementation project(path: ':actionqueue')
+    implementation project(path: ':witstudio')
+    // First-party token storage + OkHttp Bearer/401 machinery. This module has
+    // no dependency on :app or Pixiv business models.
+    implementation project(path: ':safe')
+    implementation project(path: ':communication')
+    // 应用锁（issue #1197）：BiometricPrompt + 前后台判定 + 锁屏页。对 pixiv 一无所知，
+    // 宿主只提供主题；设置页入口在 FragmentSettingsAccount。
+    implementation project(path: ':applock')
+    implementation libs.mmkv
+    // 部分华为等 OEM 上 libmmkv.so 偶发 dlopen "not found"，ReLinker 兜底从 APK 抠 .so 按绝对路径加载。
+    implementation libs.relinker
+
+    implementation libs.androidxBrowser
+
+    // Pixiv OAuth 2.0 PKCE 登录（自家库，支持 Chrome Custom Tab）
+    implementation libs.pixivLogin
+    implementation libs.jsoup
+
+    implementation libs.toaster
+    implementation libs.timber
+
+    implementation libs.androidxDocumentFile
+    implementation libs.markwon
+    // Java language implementation
+    implementation libs.androidxActivity
+    implementation libs.flexbox
+
+    implementation libs.zoomImage
+
+    implementation libs.androidxWork
+
+    // Muzei 动态壁纸来源(issue #548):MuzeiArtProvider + 文件选择器可见的 DocumentsProvider
+    implementation libs.muzei
+
+    coreLibraryDesugaring libs.desugarJdkLibs
+}
+
+// Gradle 9 下 dependencies 里的 `configurations { all*.exclude … }` 会在配置期解析配置，改用 configureEach。
+configurations.configureEach {
+    exclude group: 'com.android.support', module: 'support-v13'
+}
+
+//lintKotlin.dependsOn(formatKotlin)

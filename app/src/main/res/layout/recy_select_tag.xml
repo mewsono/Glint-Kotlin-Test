@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「按标签收藏」的一行收藏夹标签，MD3-Expressive 列表项：
+  filled card（tonal 容器）+ 20dp 大圆角 + MaterialCheckBox + MD3 排版。
+
+  MD3 属性（?attr/materialCardViewFilledStyle / textAppearanceBodyLarge / colorOnSurface）
+  之所以能解析，靠 [ceui.pixiv.ui.bookmark.SelectTagFeedFragment] 的 selectTagRenderer 在
+  inflate 时用 withMd3() 把 inflater 包进 Theme.Material3 的 ContextThemeWrapper —— 本 App
+  主题继承 QMUI，不含 MD3 属性；刻意只包行布局、不覆写 onGetLayoutInflater，理由见 withMd3
+  的 KDoc。勾选态的强调色由 fragment 运行时 tint，不吃 MD3 基线紫。
+
+  id 沿用 legacy（star_size / illust_count），渲染器与选中态逻辑一行没动。
+-->
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <data />
+
+    <com.google.android.material.card.MaterialCardView
+        style="?attr/materialCardViewFilledStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clickable="true"
+        android:focusable="true"
+        app:cardCornerRadius="20dp"
+        app:cardElevation="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="64dp"
+            android:orientation="horizontal"
+            android:paddingStart="20dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:id="@+id/star_size"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textAppearance="?attr/textAppearanceBodyLarge"
+                android:textColor="?attr/colorOnSurface" />
+
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/illust_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+</layout>

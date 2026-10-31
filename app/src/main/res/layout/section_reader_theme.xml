@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        style="@style/M3SetHeader"
+        android:text="@string/reader_section_theme"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_reader_group_card"
+        android:clipToOutline="true"
+        android:orientation="vertical">
+
+        <include
+            android:id="@+id/row_theme_picker"
+            layout="@layout/item_reader_setting_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+
+        <!-- 本卡片里「配色选择」以下的行整块在首屏之外，改成 ViewStub，
+             等首帧画完再建（见 ReaderSettingsPanel.inflateLowerSections）。 -->
+        <ViewStub
+            android:id="@+id/theme_lower_stub"
+            android:layout="@layout/section_reader_theme_lower"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"/>
+    </LinearLayout>
+</LinearLayout>

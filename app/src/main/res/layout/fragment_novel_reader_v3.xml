@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/reader_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/transparent"
+    android:clickable="true"
+    android:focusable="true">
+
+    <FrameLayout
+        android:id="@+id/reader_stage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 暖色滤镜(#1241)。只罩正文,声明在 chrome 之前,顶栏/底栏/搜索不被染色;
+         不可点击,触摸照常落到下面的阅读视图。alpha 由 applyBrightness() 设置。 -->
+    <View
+        android:id="@+id/reader_warm_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:alpha="0"
+        android:background="#FFB347"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <!-- 常驻阅读进度(#994)。刻意贴屏幕物理底边、不吃 navigationBar inset;水平方向
+         落在四分之一线(右侧那条,即 75% 处)而不是正中或角落 —— 角落容易被大 R 角屏
+         切掉。声明在两条 bar 之前,chrome 展开时被底栏盖住,同时代码里也会主动隐藏。 -->
+    <LinearLayout
+        android:id="@+id/reader_progress_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <!-- 左侧留 50%,读数块再占 50% 并居中 → 文字中心正好压在 75% 那条线上。 -->
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/reader_progress_overlay_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:paddingBottom="6dp"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            tools:text="87%" />
+    </LinearLayout>
+
+    <include
+        android:id="@+id/reader_top_bar"
+        layout="@layout/layout_reader_top_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top" />
+
+    <include
+        android:id="@+id/reader_search_overlay"
+        layout="@layout/layout_reader_search_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top" />
+
+    <include
+        android:id="@+id/reader_bottom_bar"
+        layout="@layout/layout_reader_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom" />
+
+    <!-- 与插画一级/二级详情页的进度环样式统一(30dp/5dp 圆角 Material 环)。
+         阅读器加载章节内容无字节级进度,故用不确定模式;indicatorColor 在
+         applyLoadingTint() 里按当前阅读器主题着色,避免白底主题下不可见。 -->
+    <ceui.lisa.view.SeamlessCircularProgressIndicator
+        android:id="@+id/reader_loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="gone"
+        app:indicatorColor="@color/white"
+        app:indicatorSize="30dp"
+        app:trackColor="@color/voice_record_track_color"
+        app:trackCornerRadius="4dp"
+        app:trackThickness="5dp"
+        tools:visibility="visible" />
+
+    <TextView
+        android:id="@+id/reader_error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:padding="32dp"
+        android:textColor="#66000000"
+        android:textSize="14sp"
+        android:visibility="gone"
+        tools:text="加载失败"
+        tools:visibility="visible" />
+
+</FrameLayout>

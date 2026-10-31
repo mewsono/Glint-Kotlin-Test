@@ -1,0 +1,140 @@
+package ceui.lisa.helper;
+
+import android.text.TextUtils;
+
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import ceui.lisa.activities.Shaft;
+import ceui.lisa.http.LegacyApiCalls;
+import ceui.lisa.models.ReplyCommentBean;
+import timber.log.Timber;
+
+public class CommentFilter {
+
+    private static volatile List<CommentFilterRule> rules = new ArrayList<>();
+
+    static {
+        updateRules();
+    }
+
+    public static boolean judge(ReplyCommentBean commentsBean) {
+        return rules.stream()
+                .anyMatch(rule -> rule.judge(commentsBean.getComment()) ||
+                        ((commentsBean.getParent_comment().getId() > 0) && rule.judge(commentsBean.getParent_comment().getComment()))
+                );
+    }
+
+    public static boolean judgeText(String text) {
+        if (TextUtils.isEmpty(text)) {
+            return false;
+        }
+        return rules.stream().anyMatch(rule -> rule.judge(text));
+    }
+
+    private static void updateRules() {
+        updateRulesFromLocal();
+        updateRulesFromRemote();
+    }
+
+    private static void updateRulesFromLocal() {
+        try {
+            InputStream inputStream = Shaft.getContext().getAssets().open("comment.filter.rule.txt");
+            byte[] buffer = new byte[inputStream.available()];
+            inputStream.read(buffer);
+            inputStream.close();
+            String content = new String(buffer, StandardCharsets.UTF_8);
+            rules = Arrays.stream(content.split("\\r?\\n", -1))
+                    .filter(string -> !TextUtils.isEmpty(string))
+                    .map(CommentFilterRule::new)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void updateRulesFromRemote() {
+        // 静态初始化、无宿主：挂应用级 scope；远端拉不到就沿用本地 assets 规则，失败只打日志不弹 toast
+        // （旧链路会经 ErrorCtrl 对用户弹一条和评论无关的错误，这里收掉）。
+        LegacyApiCalls.getResourceText(null, null, content -> {
+            if (TextUtils.isEmpty(content)) {
+                return;
+            }
+            rules = Arrays.stream(content.split("\\r?\\n", -1))
+                    .filter(string -> !TextUtils.isEmpty(string))
+                    .map(CommentFilterRule::new)
+                    .collect(Collectors.toList());
+        }, e -> Timber.w(e, "comment filter rule remote update failed"));
+    }
+
+    private static class CommentFilterRule {
+        private static final int URL_DOMAIN = 0; // 根据域名过滤
+        private static final int REGEX_MATCH = 1; // 根据正则过滤
+        private static final int LIST_ALL_REGEX_MATCH = 2; // 列表正则全匹配过滤
+
+        private final int ruleType;
+        private final String ruleValue;
+        private List<Pattern> mPatterns;
+
+        public CommentFilterRule(int ruleType, String ruleValue) {
+            this.ruleType = ruleType;
+            this.ruleValue = ruleValue;
+            init();
+        }
+
+        public CommentFilterRule(String ruleType, String ruleValue) {
+            this.ruleType = Integer.parseInt(ruleType);
+            this.ruleValue = ruleValue;
+            init();
+        }
+
+        public CommentFilterRule(String ruleLine) {
+            int separatorIndex = ruleLine.indexOf(",");
+            this.ruleType = Integer.parseInt(ruleLine.substring(0, separatorIndex));
+            this.ruleValue = ruleLine.substring(separatorIndex + 1);
+            init();
+        }
+
+        private void init() {
+            if (ruleType == URL_DOMAIN) {
+                String regexRuleValue = ruleValue.replace(".", "\\.");
+                mPatterns = new ArrayList<Pattern>() {
+                    {
+                        add(Pattern.compile("https?://([0-9a-zA-Z]+\\.)*" + regexRuleValue));
+                    }
+                };
+            } else if (ruleType == REGEX_MATCH) {
+                mPatterns = new ArrayList<Pattern>() {
+                    {
+                        add(Pattern.compile(ruleValue));
+                    }
+                };
+            } else if (ruleType == LIST_ALL_REGEX_MATCH) {
+                String[] ruleStrings = ruleValue.split("\\$\\$");
+                mPatterns = new ArrayList<>();
+                for (String ruleString : ruleStrings) {
+                    mPatterns.add(Pattern.compile(ruleString));
+                }
+            }
+        }
+
+        public boolean judge(String input) {
+            if (mPatterns == null || mPatterns.isEmpty() || TextUtils.isEmpty(input)) {
+                return false;
+            }
+            if (ruleType == URL_DOMAIN) {
+                return mPatterns.get(0).matcher(input).find();
+            } else if (ruleType == REGEX_MATCH) {
+                return mPatterns.get(0).matcher(input).find();
+            } else if (ruleType == LIST_ALL_REGEX_MATCH) {
+                return mPatterns.stream().allMatch(mPattern -> mPattern.matcher(input).find());
+            }
+            return false;
+        }
+    }
+}

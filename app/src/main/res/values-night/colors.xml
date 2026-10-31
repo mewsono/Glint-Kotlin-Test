@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="colorAccent">#009688</color>
+
+
+    <color name="background">#8E8E8E</color>
+    <color name="dark_bg">#999999</color>
+
+    <color name="light_bg">#1B1B1B</color>
+    <color name="settings_divider_bg">#373737</color>
+
+
+    <color name="second_light_bg">#141414</color>
+
+    <color name="follow_user_illust_divider">#ececec</color>
+
+    <color name="loading_placeholder">#14FFFFFF</color>
+
+    <color name="white">#FFFFFF</color>
+    <color name="white_and_black">#141414</color>
+    <color name="f0_and_black">#141414</color>
+
+    <color name="always_white">#FFFFFF</color>
+
+    <color name="pivision_logo_color">#BDBDBD</color>
+
+    <color name="dark_text">#FFFFFF</color>
+
+    <color name="black_overlay">#66000000</color>
+    <color name="deep_dark">#FFFFFF</color>
+    <color name="hito_bg">#000339</color>
+    <color name="trans">#00eeeeee</color>
+    <color name="novel_text_unselect">#F0F0F0</color>
+
+
+    <color name="rank_text_color">#A9A9A9</color>
+    <color name="white_to_gray">#BDBDBD</color>
+    <color name="view_history_title">#BDBDBD</color>
+    <color name="card_user_detail">#BDBDBD</color>
+    <color name="card_user_head">#666666</color>
+    <color name="normal_bg">#434343</color>
+    <color name="second_text_color">#8E8E8E</color>
+    <color name="no_data_color">#BDBDBD</color>
+    <color name="white_to_deep_dark">#040404</color>
+    <color name="comment_content">#8E8E8E</color>
+    <color name="comment_parent_bg">#607D8B</color>
+
+
+    <color name="about_user_divider">#373737</color>
+    <color name="about_user_left">#777777</color>
+    <color name="about_user_right">#BBBBBB</color>
+    <color name="about_user_white">#434343</color>
+    <color name="rank_title">#A9A9A9</color>
+    <color name="fragment_right_divider">#141414</color>
+    <color name="recmd_user_horizontal">#141414</color>
+    <color name="settings_divider">#222222</color>
+    <color name="black_to_grey">#DEDEDE</color>
+<!--    <color name="primary_to_grey">#DEDEDE</color>-->
+    <color name="f5_to_deep_dark">#040404</color>
+<!--    <color name="primary_to_huise">#646464</color>-->
+    <color name="white_to_1414">#141414</color>
+    <color name="user_name_horizontal">#A9A9A9</color>
+    <color name="white_to_black">#000000</color>
+    <color name="fragment_center">#2A2A2A</color>
+    <!-- 插画详情页图片画布底色:夜间维持近黑,不改动原有暗场观感 -->
+    <color name="illust_canvas_bg">#000000</color>
+    <color name="fragment_illust_divider">#e3e3e3</color>
+    <color name="button_stroke">#434343</color>
+
+    <color name="pixivision_logo_1">#A9A9A9</color>
+    <color name="pixivision_logo_2">#AAAAAA</color>
+    <color name="panel_bg">#2A2A2A</color>
+    <color name="image_background">#1AFFFFFF</color>
+
+    <color name="text00">#FFFFFF</color>
+    <color name="text10">#CCFFFFFF</color>
+    <color name="text20">#99FFFFFF</color>
+    <color name="white10">#1AFFFFFF</color>
+    <color name="white40">#66FFFFFF</color>
+    <color name="list_divider">#26FFFFFF</color>
+
+    <color name="page_default_background">#0A001A</color>
+
+    <color name="view_pager_shoulder">#4D000000</color>
+
+    <color name="secondary_text_color">#999999</color>
+    <color name="divider_color">#1FFFFFFF</color>
+
+    <!-- MeFragment stat-card 圆角图标背景:dark 模式用 v3_blue dark 色 14% 透明,提对比 -->
+    <color name="me_stat_icon_bg">#243D8BFD</color>
+
+    <!-- V3 Detail — Dark Mode -->
+    <!-- v3_bg / v3_surface_* 的夜间真值在 :witstudio 的 values-night/wit_colors.xml，
+         这里不再重复定义——写回会静默遮蔽模块的夜间值，且没有任何编译期报错。
+         feed_skeleton_* 的 dark 版同样搬进了 :feeds 模块，见 values/colors.xml 的说明。 -->
+    <!-- 进度条未完成段 dark 版：~25% 白让 #08080C 卡片背景上能看清 track -->
+    <!-- 选中高亮:36% 白 scrim,在近黑背景上看得出选区,浅色正文压上去仍可读 (#973) -->
+    <color name="text_selection_highlight">#5CFFFFFF</color>
+    <!-- 夜间用更亮的 v3_blue 30% 透明,在 dark 图上更明显 (#4D = 30%) -->
+    <color name="bulk_select_scrim">#4D3D8BFD</color>
+    <!-- 批量操作底栏尾段(MD3-E tonal 按钮)底色。夜间要 26%,不能跟日间一样 14%:
+         底是近黑的 v3_bg(#08080C),14% 蓝混出来跟背景几乎同色,真机上尾段读起来是
+         "两个图标浮在空处"而不是一块按钮,挨着实心蓝的首段更明显——"连成一组"就没了。 -->
+    <color name="bulk_action_tonal">#423D8BFD</color>
+    <!-- 评论毛玻璃卡片:抬升的炭黑 95%,从近黑背景上浮起,浅色文字可读 -->
+    <!-- 聊天收到气泡底:夜=比 v3_bg(#08080C)亮一档的深靛蓝,读得出气泡边界 -->
+    <color name="chat_received_bubble">#23232F</color>
+    <color name="v3_ambient_glow">#664D3F9E</color>
+    <color name="v3_nav_btn_bg">#59000000</color>
+    <color name="v3_hero_gradient_start">#08080C</color>
+    <color name="v3_hero_gradient_mid">#EB08080C</color>
+    <color name="v3_hero_gradient_end">#0008080C</color>
+    <color name="v3_stat_views_start">#C084FC</color>
+    <color name="v3_stat_views_end">#E879A8</color>
+    <color name="v3_stat_likes_start">#F472B6</color>
+    <color name="v3_stat_likes_end">#C084FC</color>
+    <color name="v3_stat_bookmarks_start">#818CF8</color>
+    <color name="v3_stat_bookmarks_end">#A78BFA</color>
+    <color name="v3_stat_comments_start">#A5B4FC</color>
+    <color name="v3_stat_comments_end">#C4B5FD</color>
+    <color name="v3_tag_locked_bg">#143F3BA0</color>
+    <color name="v3_tag_locked_border">#263F3BA0</color>
+    <color name="v3_tag_locked_text">#B3A0E8</color>
+    <color name="v3_artist_banner_start">#993F3BA0</color>
+    <color name="v3_artist_banner_end">#993A2B6B</color>
+    <color name="v3_detail_chip_ambient">#B3A0E8</color>
+    <color name="v3_scroll_progress_start">#9F7AEA</color>
+    <color name="v3_scroll_progress_mid">#FF2D78</color>
+    <color name="v3_scroll_progress_end">#FFC233</color>
+    <color name="v3_shimmer_color">#0F8B7BDB</color>
+    <color name="v3_premium_gold_start">#FFC233</color>
+    <color name="v3_premium_gold_end">#FFAA00</color>
+    <color name="v3_accent_line_purple">#807C6BC4</color>
+    <color name="v3_accent_line_pink">#80C46BB7</color>
+    <color name="v3_banner_placeholder_start">#1E1840</color>
+    <color name="v3_banner_placeholder_center">#2A1440</color>
+    <color name="v3_banner_placeholder_end">#161A38</color>
+    <!-- 用户首页 关注 / P友 数字 — 夜间保持原先的浅色 accent。 -->
+    <color name="v3_stat_following_num">#A5B4FC</color>
+    <color name="v3_stat_mypixiv_num">#2DD4A8</color>
+
+    <!-- MD3-E 设置页 -->
+    <color name="m3_settings_switch_track_off">#33323C</color>
+    <color name="m3_settings_switch_outline">#94919E</color>
+    <color name="m3_settings_icon_circle">#282640</color>
+</resources>

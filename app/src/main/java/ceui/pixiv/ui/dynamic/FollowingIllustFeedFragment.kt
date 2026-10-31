@@ -1,0 +1,182 @@
+package ceui.pixiv.ui.dynamic
+
+import android.os.Bundle
+import android.view.View
+import androidx.fragment.app.viewModels
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewbinding.ViewBinding
+import ceui.lisa.activities.Shaft
+import ceui.lisa.helper.IllustNovelFilter
+import ceui.pixiv.witstudio.theme.V3Palette
+import ceui.pixiv.api.Client
+import ceui.pixiv.api.model.Illust
+import ceui.pixiv.feeds.FeedItem
+import ceui.pixiv.feeds.FeedRenderer
+import ceui.pixiv.feeds.FeedSkeletonView
+import ceui.pixiv.feeds.FeedTimelineSkeletonView
+import ceui.pixiv.feeds.pixiv.pixivFeedSource
+import ceui.pixiv.feeds.feedViewModels
+import ceui.pixiv.ui.common.IllustFeedFragment
+import ceui.pixiv.ui.common.IllustFeedItem
+import ceui.pixiv.ui.common.JustifiedLayoutManager
+import ceui.pixiv.ui.common.observeR18FilterChanges
+
+/**
+ * 「动态」页的插画/漫画列表（feeds 框架版，替代 legacy FragmentRight 自身的
+ * NetListFragment + RightRepo + IAdapter/TimelineAdapter 那一套）。
+ * 宿主是 [ceui.lisa.fragments.FragmentRight]，装在它的 `illust_list_container` 里。
+ *
+ * 本页特有的行为，其余（收藏、长按菜单、详情 pager 续拉回流、合池）全部继承自
+ * [IllustFeedFragment]：
+ *
+ * 1. **筛选范围**（全部 / 公开 / 私人）：宿主的筛选条通过 [setRestrict] 推进来。
+ *    值存在 [RestrictViewModel] 而不是 Fragment 字段——数据源归 FeedViewModel 长期持有、
+ *    比 Fragment 实例活得久，按零捕获约定不能读 Fragment 字段；而 [RestrictViewModel] 与
+ *    FeedViewModel 同一个 store、同生共死，捕获它既不漏也不会读到上一代的值。
+ * 2. **两种排布**：时间线（单列大卡）/ 瀑布流，由设置「关注动态布局模式」持久化，
+ *    宿主的按钮切换后调 [applyLayoutMode] —— 只重装 Renderer + LayoutManager，
+ *    数据留在 VM 里**不重拉**（对齐 legacy 换 adapter 的语义）。
+ * 3. **过滤已收藏**：与动态小说共用设置，只影响关注动态，刷新和每次续页时生效；命中即丢。
+ * 4. **全局「R-18 过滤」**：只给条目打隐藏标记、不丢，开关翻转时就地重算显隐，不重新拉数据
+ *    —— 那个开关是长按侧边栏头像切的，抽屉开着、本页不会经过 onResume，只能靠广播通知。
+ */
+class FollowingIllustFeedFragment : IllustFeedFragment() {
+
+    /**
+     * 铺到屏幕底,底部安全区靠 inset 补:无底栏的宿主是手势条/导航栏,首页那份是浮在内容之上的
+     * 底栏高度(MainActivity 重写了分发给内容区的 inset)。以前首页是 view_pager 让位给底栏,
+     * 这里保持 false;现在底栏会跟随滚动收起,内容必须铺满整屏,改由列表自己补 padding。
+     */
+    override val applyBottomSafeInset: Boolean = true
+
+    // 动态页主动刷新（下拉或底栏点击）期望回到顶部查看最新关注动态，且回顶走 resetToTop 彻底归零列状态，避免保留位置在瀑布流产生列行错位。
+    override val resetScrollOnRefresh: Boolean = true
+
+    private val restrictViewModel: RestrictViewModel by viewModels()
+
+    override val feedViewModel by feedViewModels {
+        // 取成局部 val:捕获的是 VM 实例(与 FeedViewModel 同 store、同寿命),不是 Fragment
+        val holder = restrictViewModel
+        pixivFeedSource({ Client.appApi.getFollowingIllusts(holder.restrict) }) { resp, _ ->
+            resp.displayList.mapNotNull { followingItem(it) }
+        }
+    }
+
+    override fun feedItemFromBean(bean: Illust?): IllustFeedItem? = followingItem(bean)
+
+    // 详情 pager 的通用 Mapper 不认识动态专属过滤，开启时只浏览已过滤的列表快照；
+    // 下一页由本列表加载，避免已收藏作品从详情续读路径漏进来。
+    override val detailContinuationCursor: String?
+        get() = if (Shaft.sSettings.isDeleteStarIllust) null else super.detailContinuationCursor
+
+    /**
+     * 本列表嵌在动态页那张圆角 sheet 里，底色必须跟 sheet 一致，否则筛选条下方会裂出一道
+     * 撞色横缝（裸 fragment_feed 的基类底色默认是整页的 v3_bg）。
+     *
+     * sheet 用 [V3Palette.cardFill]（隐约带主题色的不透明悬浮底，日夜双模）而不是静态的
+     * v3_menu_bg——后者夜间写死 #1A1A2E 是藏青，主题色换成绿/粉时就成了页面上一条突兀的蓝带。
+     * 这里与 FragmentRight 给 content_item 上色取的是同一个值，两边必须同源。
+     */
+    override val feedRootBackgroundColor: Int
+        get() = V3Palette.from(requireContext()).cardFill
+
+    /** 时间线模式 = 单列大卡；关掉就是瀑布流。真源是设置项，设置页「关注动态布局模式」同一个开关。 */
+    private val isTimelineMode: Boolean
+        get() = !Shaft.sSettings.isUseStaggeredLayout()
+
+    override fun onCreateLayoutManager(): RecyclerView.LayoutManager {
+        return if (isTimelineMode) {
+            LinearLayoutManager(requireContext())
+        } else {
+            super.onCreateLayoutManager()
+        }
+    }
+
+    override fun onCreateRenderers(): List<FeedRenderer<out FeedItem, out ViewBinding>> {
+        return if (isTimelineMode) {
+            listOf(
+                timelineIllustRenderer(
+                    onClick = { item -> openDetail(item) },
+                    // 打码的卡点一下 = 取消屏蔽，同瀑布流卡
+                    onUnmute = { item -> setIllustMuted(item, false) },
+                )
+            )
+        } else {
+            super.onCreateRenderers()
+        }
+    }
+
+    override fun onListReady(listView: RecyclerView) {
+        // 瀑布流卡自身无 margin,靠基类的 8dp SpacesItemDecoration 拉开;
+        // 时间线大卡自带内边距和分隔线,再加 decoration 会双份留白
+        if (!isTimelineMode) {
+            super.onListReady(listView)
+        }
+    }
+
+    override fun onCreateSkeletonView(layoutManager: RecyclerView.LayoutManager): FeedSkeletonView? {
+        // 按 LayoutManager 判而不是再读一次设置:骨架必须和这次装配出来的列表长得一样,
+        // 不能有第二个真源(哪怕理论上读不出不一致,也别留这种耦合)
+        // 齐行布局的 GridLayoutManager 也是 LinearLayoutManager 子类，要先排除
+        return if (layoutManager is LinearLayoutManager && layoutManager !is JustifiedLayoutManager) {
+            FeedTimelineSkeletonView(requireContext())
+        } else {
+            super.onCreateSkeletonView(layoutManager)
+        }
+    }
+
+    /**
+     * 切筛选范围（宿主筛选条选中另一项时调）。对齐 legacy 的
+     * `RightRepo.setRestrict + forceRefresh`：**变了才重拉**，没变是 no-op。
+     */
+    fun setRestrict(restrict: String) {
+        if (restrictViewModel.restrict == restrict) return
+        restrictViewModel.restrict = restrict
+        // forceRefresh 在 view 未创建时安全 no-op:此时数据也还没拉过,
+        // 首屏会自然用上面刚写进去的新 restrict
+        forceRefresh()
+    }
+
+    /** 时间线 / 瀑布流切换后重装列表（宿主写完设置项再调）。数据不重拉。 */
+    fun applyLayoutMode() {
+        rebuildList()
+    }
+
+    /**
+     * 全局「R-18 过滤」开关变了：就地重算每条插画的显隐，不重新拉数据。
+     *
+     * 条目从来没被摘走（mapper 只打隐藏标记），所以关掉开关时它们原地回来。
+     */
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        viewLifecycleOwner.observeR18FilterChanges(requireContext(), ::onR18FilterChanged)
+    }
+
+    private fun onR18FilterChanged() {
+        applyItemVisibility { item ->
+            (item as? IllustFeedItem)?.withR18Hidden(Shaft.sSettings.isR18FilterTempEnable) ?: item
+        }
+    }
+
+    companion object {
+        // 首屏、刷新、翻页和详情回传共用；不捕获 Fragment，开关在每次映射时读取。
+        private fun followingItem(illust: Illust?): IllustFeedItem? {
+            // R-18 只打隐藏标记、不丢条目（见 FeedUiState.visibleItems）：这个开关是长按侧边栏
+            // 头像切的临时开关，随时可能被关掉，条目留在列表里才能原地回来、不必重新拉一次
+            val item = IllustFeedItem.of(illust, skipR18Filter = true) ?: return null
+            // 「过滤已收藏」仍然是丢：用户要的是它别出现，而且它走设置页改、回来有 onResume
+            if (Shaft.sSettings.isDeleteStarIllust && item.illust.isBookmarked == true) return null
+            return item.withR18Hidden(Shaft.sSettings.isR18FilterTempEnable)
+        }
+
+        /**
+         * R-18 过滤的标记口径，两个方向共用：开关开着且这条算 R-18 就藏，否则放出来。
+         *
+         * 判定用 [IllustNovelFilter.hitsR18Filter]（不看开关）而不是 `judgeR18Filter`——后者在
+         * 开关关着时恒为 false，拿不到「它本来是 R-18」这个事实，关掉开关时就放不回来。
+         */
+        private fun IllustFeedItem.withR18Hidden(filterOn: Boolean): IllustFeedItem =
+            withHidden(filterOn && IllustNovelFilter.hitsR18Filter(illust))
+    }
+}

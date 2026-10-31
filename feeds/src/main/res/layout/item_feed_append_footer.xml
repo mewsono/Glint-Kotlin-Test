@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="16dp">
+
+    <ProgressBar
+        android:id="@+id/feed_footer_progress"
+        style="?android:attr/progressBarStyleSmall"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="center" />
+
+    <TextView
+        android:id="@+id/feed_footer_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/list_load_failed_tap_retry"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/feed_footer_paused"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/feed_append_paused_tap_to_continue"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp"
+        android:visibility="gone" />
+</FrameLayout>

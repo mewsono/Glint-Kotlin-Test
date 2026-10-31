@@ -1,0 +1,522 @@
+package ceui.pixiv.ui.common
+
+import android.content.Intent
+import android.os.Bundle
+import android.view.View
+import androidx.annotation.LayoutRes
+import androidx.core.view.doOnNextLayout
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.ViewModel
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import androidx.viewbinding.ViewBinding
+import ceui.lisa.R
+import ceui.lisa.activities.Shaft
+import ceui.lisa.activities.VActivity
+import ceui.lisa.core.Container
+import ceui.lisa.core.PageData
+import ceui.lisa.download.IllustDownload
+import ceui.lisa.helper.StaggeredManager
+import ceui.pixiv.api.model.Illust
+import ceui.lisa.utils.DensityUtil
+import ceui.lisa.utils.Params
+import ceui.lisa.utils.PixivOperate
+import ceui.pixiv.actions.PixivActions
+import ceui.lisa.view.SpacesItemDecoration
+import ceui.pixiv.feeds.FeedFragment
+import ceui.pixiv.feeds.FeedItem
+import ceui.pixiv.feeds.FeedRenderer
+import ceui.pixiv.feeds.FeedSkeletonView
+import ceui.pixiv.feeds.FeedViewModel
+import ceui.pixiv.utils.pinHostGlide
+import com.bumptech.glide.Glide
+import com.bumptech.glide.RequestManager
+import java.util.UUID
+
+/**
+ * 插画瀑布流列表页的共享基类（feeds 框架 + legacy 详情/收藏/菜单协同的桥接层）。
+ * 子类只需声明数据源（feedViewModels + mapper）和卡片 Renderer。
+ *
+ * 本类只做**编排**：声明钩子、接线协作件、提供列表状态的读写口。具体的活都在旁边的文件里，
+ * 各自可以单独读、单独改：
+ *
+ * | 关注点 | 去处 |
+ * |---|---|
+ * | 条目是什么 / 怎么从各上游建出来 / 收藏态怎么变 | [IllustFeedItem]（纯数据，无 Android 依赖，可单测） |
+ * | 卡片怎么画 + 收藏动画 | [staggerIllustRenderer] |
+ * | 长按菜单 | [showCardMenu] |
+ * | 详情回传（续拉页 / 跟滚）+ 收藏广播回流 | [IllustFeedDetailSync] + [FeedLikeSync] |
+ * | 列表数据 → ObjectPool / 关注态 | [IllustFeedPoolSync] |
+ *
+ * 这些协作件都**不依赖继承本类**（[IllustFeedDetailSync] / [IllustFeedPoolSync] / [FeedLikeSync]
+ * 是普通类，挂在 viewLifecycleOwner 上），混排页等任何 feeds 页面都能单独挑用。
+ *
+ * 本类统一提供：
+ * - 宿主是 TemplateActivity / 普通 Activity（非 NavHost）：点击开详情走 PageData + Container +
+ *   VActivity，不能用 findNavController；
+ * - 卡片收藏爱心（私密收藏设置、收藏后自动下载 #880、失败回滚）+ LIKED_ILLUST 广播双向同步；
+ * - 详情 pager 续拉的页经 FRAGMENT_ADD_DATA 追加回列表并用 adoptCursor 接管翻页进度；
+ * - StaggeredManager 瀑布流（吞 SGLM predictive-layout 在 fling+插页同帧时的 AOSP 内部崩溃）。
+ */
+abstract class IllustFeedFragment(
+    @LayoutRes contentLayoutId: Int = ceui.pixiv.feeds.R.layout.fragment_feed,
+) : FeedFragment(contentLayoutId) {
+
+    abstract override val feedViewModel: FeedViewModel<String>
+
+    /** 页面协同状态归 VM：Fragment 重建（旋转/深色切换）后详情回传链路不断。 */
+    protected val syncViewModel: IllustFeedSyncViewModel by viewModels()
+
+    /**
+     * 卡片图的 Glide 请求管理器。
+     *
+     * 建一次复用，别在每次 bind / recycle 里 `Glide.with(view)`：那条重载每次都要
+     * `findSupportFragment(view, activity)` —— 递归遍历宿主整棵 fragment 树（每个节点一次
+     * `getFragments()` 的 ArrayList 分配 + 一次 synchronized）、再从 decor view 找 content root、
+     * 再从 ImageView 往上走一遍。一张卡要跑 3 次（主请求 / error 兜底 / recycle 清图），fling 时
+     * 约 45 次/秒，全在帧路径上。`Glide.with(Fragment)` 直接命中，无查找；解析结果与
+     * `Glide.with(view)` 是同一个 RequestManager（view 本来就在本 Fragment 里），行为等价。
+     */
+    internal val illustGlide: RequestManager by lazy { Glide.with(this) }
+
+    /**
+     * 瀑布流当前列宽（px）。renderer 用它给 Glide 显式 override 请求尺寸。
+     * 取 LayoutManager 实时宽度与列数（measure 先于绑定，旋转/分栏后已是新值），首帧兜底屏宽。
+     */
+    internal val illustColumnWidthPx: Int
+        get() {
+            val listWidth = feedBinding.feedListView.layoutManager?.width?.takeIf { it > 0 }
+                ?: resources.displayMetrics.widthPixels
+            return (listWidth / illustSpanCount).coerceAtLeast(1)
+        }
+
+    /**
+     * 瀑布流当前列数：随列表宽度自适应（[StaggeredManager.adaptive]），不等于「每行几列」设置。
+     * 齐行布局（GridLayoutManager 的跨度是像素数）取设置值，列宽即目标行高。
+     */
+    internal val illustSpanCount: Int
+        get() = (feedBinding.feedListView.layoutManager as? StaggeredGridLayoutManager)?.spanCount
+            ?: Shaft.sSettings.lineCount
+
+    /**
+     * 本页列表装配时采用的布局（设置项「插画列表布局」，#1214）。随视图定下（[onViewCreated]），
+     * renderer 绑定时读它；设置改了由 [onResume] 发现并整表重装，回到列表即生效。
+     */
+    internal var illustListLayout: IllustListLayout = IllustListLayout.MASONRY
+        private set
+
+    /**
+     * 详情 pager 回传的 bean 建条目的钩子。R18 专属榜单等「本页语义就是看 R18」的
+     * 子类覆盖此方法透传 skipR18Filter，否则续拉的页会被全局 R18 过滤整页清空。
+     */
+    protected open fun feedItemFromBean(bean: Illust?): IllustFeedItem? {
+        return IllustFeedItem.of(bean)
+    }
+
+    /**
+     * 收藏时是否顺带拉取相关作品（FRAGMENT_ADD_RELATED_DATA 广播回流插入列表）。
+     * 只有首页推荐 tab 覆盖为「收藏时显示相关作品」设置，其他列表保持关闭。
+     */
+    protected open val showRelatedOnStar: Boolean
+        get() = false
+
+    /**
+     * 条目里需要合入 ObjectPool / 灌关注状态的 bean。默认取插画条目自身的 bean；
+     * 携带附属 bean 的条目（排行榜预览头等）由子类覆盖补充。
+     *
+     * ⚠️ 交出来的 bean 的收藏 / 关注态必须是**当前用户的新鲜值**：本地快照（稍后再看 / 发现池 /
+     * 历史）、第三方上报榜单（shaft-api-v2 系）、精简网页 bean（按 Tag 筛选）都不是——那些页面
+     * 一律覆写成 `emptyList()`，否则 mergeKeepingExisting 会拿旧值 / 假值盖掉池里更新的状态。
+     */
+    protected open fun poolableBeansOf(item: FeedItem): List<Illust> {
+        return if (item is IllustFeedItem) listOf(item.illust) else emptyList()
+    }
+
+    /**
+     * 隐藏卡片上的收藏爱心。默认跟「插画列表显示收藏按钮」全局设置走，所有插画瀑布流页一并生效，
+     * 新增的页面无需额外接线；自己的收藏页 / 收藏库在此之上再叠「收藏页隐藏收藏按钮」（对齐 legacy
+     * IAdapterWithStar）。每次 bind 动态读；屏上已绑定的卡由 [onResume] 比对 [boundHideLikeButton] 补绑。
+     */
+    internal open val hideLikeButton: Boolean
+        get() = !Shaft.sSettings.isShowIllustCardBookmarkButton()
+
+    /**
+     * 卡片最近一次绑定时用的 [hideLikeButton]（null = 还没绑过），由 renderer 在绑定处回写。
+     *
+     * 两个开关都在独立 Activity 的设置页里改，回来时屏上已绑好的卡不会自己重绑（短列表、首屏那几张
+     * 根本不回收），用户就会看到「关了没反应」。[onResume] 拿它比对，不一致就补一次局部重绑。
+     * 记在绑定处而不是首次 onResume：BEHAVIOR_RESUME_ONLY_CURRENT_FRAGMENT 的相邻 tab 在 STARTED
+     * 时就已经把卡绑好了；也避开在 onViewCreated 里读子类覆写（收藏库的 shelf 此时可能还没 bind）。
+     */
+    internal var boundHideLikeButton: Boolean? = null
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        // 必须在 super 之前：基类 onViewCreated 里就会建 renderer / LayoutManager
+        illustListLayout = IllustListLayout.current()
+        super.onViewCreated(view, savedInstanceState)
+        pinHostGlide(illustGlide)
+
+        // 广播协同（收藏回流 / 详情 pager 续拉 / 返回跟滚）与 ObjectPool 合池
+        // 拆在独立协作件里，生命周期随 viewLifecycleOwner 自理
+        IllustFeedDetailSync(
+            feedViewModel = feedViewModel,
+            listPageUuid = syncViewModel.listPageUuid,
+            itemFromBean = ::feedItemFromBean,
+            onDetailScrolledTo = ::scrollToDetailPosition,
+        ).bind(requireContext(), viewLifecycleOwner)
+        IllustFeedPoolSync(syncViewModel, ::poolableBeansOf)
+            .bind(viewLifecycleOwner, feedViewModel.uiState)
+        observeMuteRevision()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val latest = IllustListLayout.current()
+        if (latest != illustListLayout) {
+            illustListLayout = latest
+            rebuildList()
+        }
+        val bound = boundHideLikeButton
+        if (bound != null && bound != hideLikeButton) {
+            rebindAllIllustCards(PAYLOAD_ILLUST_LIKE_VISIBILITY_CHANGED)
+        }
+    }
+
+    /**
+     * 卡片长按菜单里改布局：存设置，本页当场重装（其它列表回到前台时由 [onResume] 跟上）。
+     *
+     * 重装会换 LayoutManager，滚动位置随之归零；把长按的那张卡按原来的屏幕高度接回来，
+     * 人还停在刚才看的地方。rebuildList 对空 adapter 的首次提交是同步的，所以紧跟着设的
+     * 滚动目标会在下一次 layout 生效。
+     */
+    internal fun changeIllustListLayout(layout: IllustListLayout, anchorIllustId: Long) {
+        IllustListLayout.save(layout)
+        val latest = IllustListLayout.current()
+        if (latest == illustListLayout) return
+        val list = feedBinding.feedListView
+        val position = feedAdapter?.currentList
+            ?.indexOfFirst { it is IllustFeedItem && it.illust.id == anchorIllustId } ?: -1
+        val offset = list.findViewHolderForAdapterPosition(position)
+            ?.itemView?.let { it.top - list.paddingTop } ?: 0
+        // 旧列表是否还看得到第 0 项（顶部的榜单条 / 第一张卡）
+        val wasAtTop = list.findViewHolderForAdapterPosition(0) != null
+        illustListLayout = latest
+        rebuildList()
+        if (position < 0) return
+        when (val manager = list.layoutManager) {
+            // 齐行：offset 口径的换算见 scrollToPositionWithOffset 扩展
+            is LinearLayoutManager -> list.scrollToPositionWithOffset(position, offset)
+            is StaggeredGridLayoutManager -> {
+                // SGLM 跳到某个位置时，上方的条目是倒着往回排的、列分配和从顶排下来的不一样，
+                // 且它会无视全新 LayoutManager 上的 offset、把目标贴到顶部 padding。所以：
+                // - 原先就在顶部附近：照常从顶排，排完用 scrollBy 顺着挪过去，上方排布不被打乱
+                //   （跳位置的话，上方内容不够高时 SGLM 下一趟 layout 会把空缺补平、卡又顶回最上面）；
+                // - 否则先跳到位置，排完、绘制前再用 scrollBy 挪回原高度。
+                // 不补 invalidateSpanAssignments：全新 LayoutManager 没有残留分配，补了反而重新对齐
+                fun restoreAnchorAfterLayout(jumpIfMissing: Boolean): Unit = list.doOnNextLayout {
+                    val anchor = manager.findViewByPosition(position)
+                    if (anchor != null) {
+                        list.scrollBy(0, anchor.top - list.paddingTop - offset)
+                    } else if (jumpIfMissing) {
+                        // 从顶排下来卡不在首屏（换成单列这类更高的排布）：退回先跳位置
+                        manager.scrollToPosition(position)
+                        restoreAnchorAfterLayout(jumpIfMissing = false)
+                    }
+                }
+                if (!wasAtTop) manager.scrollToPosition(position)
+                restoreAnchorAfterLayout(jumpIfMissing = wasAtTop)
+            }
+        }
+    }
+
+    /** 按 [illustListLayout] 建列表的 LayoutManager（首页推荐等带整行 header 的子类同样走这里）。 */
+    override fun onCreateLayoutManager(): RecyclerView.LayoutManager {
+        val context = requireContext()
+        val lineCount = Shaft.sSettings.lineCount
+        // SGLM 的 gap 重排保持默认开启：它引起的跨列改派会由 StaggeredManager 重算 ItemDecoration
+        // 间距兜住，不再需要靠 GAP_HANDLING_NONE 关掉整条 gap 策略。
+        return when (illustListLayout) {
+            IllustListLayout.JUSTIFIED ->
+                JustifiedLayoutManager(context, lineCount, DensityUtil.dp2px(8.0f))
+            // 单列就是一列，平板也不按宽度加列
+            IllustListLayout.SINGLE_COLUMN ->
+                StaggeredManager(1, StaggeredGridLayoutManager.VERTICAL)
+            // 方格 = 瀑布流 + 卡片恒 1:1：等高的卡在 SGLM 里自然排成对齐的网格，整行 header 照旧可用
+            IllustListLayout.MASONRY, IllustListLayout.GRID ->
+                StaggeredManager.adaptive(context, lineCount)
+        }
+    }
+
+    override fun onListReady(listView: RecyclerView) {
+        // recy_illust_stagger 卡片自身无 margin，间距对齐 legacy staggerRecyclerView
+        val manager = listView.layoutManager
+        listView.addItemDecoration(
+            if (manager is JustifiedLayoutManager) {
+                JustifiedItemDecoration(manager)
+            } else {
+                SpacesItemDecoration(DensityUtil.dp2px(8.0f))
+            }
+        )
+    }
+
+    /**
+     * 首屏骨架跟着本次装配的布局走：方格画 1:1 网格、齐行按同一套分行画行；瀑布流和单列
+     * （一列的 SGLM）沿用基类的瀑布流骨架。方格和瀑布流是同一种 LayoutManager，只能按
+     * [illustListLayout] 分 —— 它就是这次装 LayoutManager 用的那个值，不是第二个真源。
+     */
+    override fun onCreateSkeletonView(layoutManager: RecyclerView.LayoutManager): FeedSkeletonView? {
+        val space = DensityUtil.dp2px(8.0f)
+        return when {
+            layoutManager is JustifiedLayoutManager -> IllustLayoutSkeletonView(
+                requireContext(), IllustListLayout.JUSTIFIED, Shaft.sSettings.lineCount, layoutManager.spacePx,
+            )
+            illustListLayout == IllustListLayout.GRID && layoutManager is StaggeredGridLayoutManager ->
+                IllustLayoutSkeletonView(
+                    requireContext(), IllustListLayout.GRID, layoutManager.spanCount, space,
+                )
+            else -> super.onCreateSkeletonView(layoutManager)
+        }
+    }
+
+    /** 默认就是标准瀑布流插画卡；需要混排其他条目类型的子类自行覆盖再拼上。 */
+    override fun onCreateRenderers(): List<FeedRenderer<out FeedItem, out ViewBinding>> {
+        return listOf(staggerIllustRenderer())
+    }
+
+    /** 首屏铺满的是插画卡（混排页头的页面如首页推荐，主力卡也不在 0 号）。 */
+    override val firstScreenPrewarmItemClass: Class<out FeedItem>?
+        get() = IllustFeedItem::class.java
+
+    // ── 列表状态的读口（renderer / 菜单 / 子类共用）──────────────────────────────
+
+    /** 屏上可见的插画条目：不含页面临时隐藏的（[ceui.pixiv.feeds.FeedItem.hidden]），交给详情页的快照也只该是这些。 */
+    internal fun currentIllustItems(): List<IllustFeedItem> {
+        return feedViewModel.uiState.value.visibleItems.filterIsInstance<IllustFeedItem>()
+    }
+
+    /** VM 里当前这条作品的最新条目（真源）；已被刷新挤掉则 null。 */
+    internal fun currentIllustItem(illustId: Long): IllustFeedItem? {
+        return feedViewModel.uiState.value.items
+            .firstOrNull { it is IllustFeedItem && it.illust.id == illustId } as? IllustFeedItem
+    }
+
+    // ── 屏蔽此作品（遮罩 + 屏蔽记录）──────────────────────────────────────────
+
+    /** 本页卡片上一次渲染时的 [IllustMuteStore.revision]，见 [observeMuteRevision]。 */
+    private var lastMuteRevision = IllustMuteStore.revision
+
+    /**
+     * 开关某条作品的屏蔽：写 [IllustMuteStore]（内存当帧生效、Room 的 `tag_mute_table` 异步落地，
+     * 于是「屏蔽记录」页里能看到这一条），再让屏上那张卡当帧换成模糊图 + 粒子（或还原）。
+     *
+     * 三个入口都走这里：长按菜单里的「屏蔽 / 取消屏蔽此作品」，以及**点一下已打码的卡片**
+     * （= 取消屏蔽，见 [staggerIllustRenderer] 的点击处理）。屏蔽态只有「在不在名单里」一种，
+     * 没有「只揭开不取消」的中间态——理由见 [MutedWorkStore] 的类注释。
+     *
+     * 收 [IllustFeedItem] 而不是裸 id：屏蔽方向要把整个 bean 序列化进记录，「屏蔽记录」页靠它
+     * 画封面/标题/作者。取消方向用不上，store 那边也就不会去调 payload。
+     */
+    internal fun setIllustMuted(item: IllustFeedItem, muted: Boolean) {
+        // 已是目标态时 store 返回 false，直接省掉这次重绑（图会重发一次 Glide 请求）
+        if (!IllustMuteStore.setMuted(item.illust.id, muted) { item.illust }) return
+        rebindIllustCard(item.illust.id)
+    }
+
+    /**
+     * 让屏上那张卡当帧换成模糊图 + 粒子（或还原）。
+     *
+     * 走 `notifyItemChanged(payload)` 而不是 [FeedViewModel] 的条目变更：屏蔽态不在条目上
+     * （理由见 [PAYLOAD_ILLUST_SPOILER_CHANGED]），列表数据一个字节没变，没有 diff 可跑。
+     * 这条通知是纯 UI 的一次性重绑，被后续 submitList 覆盖也无所谓——全量绑定同样现读名单。
+     *
+     * 只管本页那一张；别的页由 [observeMuteRevision] 跟上。顺手记下版本号，免得订阅回调为自己
+     * 刚做的这次变更再空跑一遍整屏（粒子会白淡入淡出一次）。
+     */
+    private fun rebindIllustCard(illustId: Long) {
+        lastMuteRevision = IllustMuteStore.revision
+        val adapter = feedAdapter ?: return
+        val position = adapter.currentList.indexOfFirst {
+            it is IllustFeedItem && it.illust.id == illustId
+        }
+        if (position >= 0) {
+            adapter.notifyItemChanged(position, PAYLOAD_ILLUST_SPOILER_CHANGED)
+        }
+    }
+
+    /**
+     * 订阅屏蔽名单的版本号，变了就给本页所有插画卡补一次 spoiler 重绑。
+     *
+     * 屏蔽态不在条目上、bind 时现读，所以别处改完名单（详情页的「取消屏蔽」、「屏蔽记录」页
+     * 的删除、备份恢复/导入、老 MMKV 名单迁移落地）是通知不到已经绑好的卡片的。指望「等它自己
+     * 滑动复用重绑」不成立：短列表和已经在屏幕上的卡根本不会被回收，那张卡就一直糊着
+     *（或一直不糊）到页面重建。
+     *
+     * **用 LiveData 而不是在 onResume 里比对版本号**：本仓大量 pager 是单参
+     * `FragmentPagerAdapter` + `setOffscreenPageLimit(n-1)`（`MainActivity.initFragment` 就是），
+     * 同一 pager 的所有 tab 同时常驻 RESUMED，左右滑一次 onResume 都不会触发——在 A tab 屏蔽的卡，
+     * 滑到同样含它的 B tab 会一直不打码。LiveData 按 STARTED 投递，兄弟页当场收到。
+     *
+     * 发 payload 而不是 notifyDataSetChanged：插画卡认得它，只重算屏蔽相关的那几件事，图的请求
+     * key 没变时直接跳过，不会满屏重发 Glide 请求。
+     */
+    private fun observeMuteRevision() {
+        IllustMuteStore.revisionLive.observe(viewLifecycleOwner) { revision ->
+            if (revision == lastMuteRevision) return@observe
+            lastMuteRevision = revision
+            rebindAllIllustCards(PAYLOAD_ILLUST_SPOILER_CHANGED)
+        }
+    }
+
+    /**
+     * 给 currentList 里**每一段连续的 [IllustFeedItem]** 发 [payload]（插画卡认得的局部重绑标记）。
+     *
+     * 逐段发而不是 `notifyItemRangeChanged(0, itemCount)`：混排页里通知到的非插画条目会因为
+     * 「不认识这个 payload」被框架退回**全量重绑**。纯瀑布流页看不出差别，[ArtworkV3Fragment]
+     * 这种就要命了——它也是 IllustFeedFragment，条目里混着大图页（重绑即重新发大图 Glide 请求）、
+     * ugoira 播放器和评论，全被一条与它们无关的屏蔽通知砸一遍。纯插画列表仍然只发一次区间通知。
+     */
+    private fun rebindAllIllustCards(payload: Any) {
+        val adapter = feedAdapter ?: return
+        val items = adapter.currentList
+        var start = -1
+        items.forEachIndexed { index, item ->
+            if (item is IllustFeedItem) {
+                if (start < 0) start = index
+            } else if (start >= 0) {
+                adapter.notifyItemRangeChanged(start, index - start, payload)
+                start = -1
+            }
+        }
+        if (start >= 0) {
+            adapter.notifyItemRangeChanged(start, items.size - start, payload)
+        }
+    }
+
+    // ── 收藏 ────────────────────────────────────────────────────────────────
+
+    internal fun toggleLike(item: IllustFeedItem) {
+        // 单一真源是 item.illust（UI 由它渲染）：PixivOperate.postLike 按它当前的收藏态决定
+        // 收藏还是取消，发出的请求永远与用户看到的操作一致。
+        val uiLiked = item.illust.is_bookmarked == true
+        val willBookmark = !uiLiked
+        val illustId = item.illust.id
+        // showRelatedOnStar 时 postLike 会顺带拉相关作品并广播 FRAGMENT_ADD_RELATED_DATA；
+        // index 是 legacy 位置语义（feeds 接收器改按广播里的作品 id 锚定），照传兼容；
+        // 带上本列表 uuid，广播只被发起收藏的列表认领（多个推荐页同时存活时不串扰）。
+        //
+        // 不再传失败回调：收藏改走 PixivActionQueue 之后，终态失败由队列统一回滚，并带着
+        // 相反的值重发一次 LIKED_ILLUST —— 本列表的 FeedLikeSync 收到就把条目拨回去
+        //（withBookmarked 幂等）。回调式回滚反而会让队列在冷却几分钟后去碰一个早已销毁的
+        // Fragment 持有的 VM。
+        PixivOperate.postLike(
+            item.illust,
+            PixivActions.defaultBookmarkRestrict(),
+            showRelatedOnStar,
+            feedViewModel.uiState.value.items.indexOfFirst {
+                it is IllustFeedItem && it.illust.id == illustId
+            },
+            syncViewModel.listPageUuid,
+        )
+        // 乐观状态写进列表条目而不是只写按钮：滑走再滑回不闪色；成功广播回流后是幂等 no-op
+        feedViewModel.updateItems(IllustFeedItem::class.java) {
+            if (it.illust.id == illustId) it.withBookmarked(willBookmark) else it
+        }
+        // 收藏后自动下载只在主动收藏（非取消）时触发，避免与「下载时自动收藏」循环联动（#880）
+        if (willBookmark && Shaft.sSettings.isAutoDownloadAfterStar()) {
+            IllustDownload.downloadIllustAllPages(item.illust)
+        }
+    }
+
+    // ── 详情跳转 ────────────────────────────────────────────────────────────
+
+    /**
+     * 交接给详情页 pager 的续读游标。默认就是列表当前游标——pixiv 列表的游标本身就是 nextUrl，
+     * 详情页划到底可以照着它继续请求。
+     *
+     * **本地数据源必须覆写成 null**：详情页 pager 只会把它当 URL 直接请求下一页，喂页号 /
+     * offset 进去只会请求失败（对齐 legacy——LocalListFragment 从不 setNextUrl，本地列表
+     * 开详情时 PageData.nextUrl 一直是 null）。
+     *
+     * **结果集被本页自己过滤过的源也必须覆写成 null**：详情 pager 那条回传链复现不了你的过滤
+     * （见 [ceui.pixiv.ui.search.SearchIllustFeedFragment] 的覆写）。
+     */
+    protected open val detailContinuationCursor: String?
+        get() = feedViewModel.currentCursor
+
+    internal fun openDetail(item: IllustFeedItem) {
+        val illustItems = currentIllustItems()
+        val position = illustItems.indexOfFirst { it.illust.id == item.illust.id }
+        // uuid 使用单次会话专属的随机 UUID，保证 Container 的所有权随单个 VActivity 生命周期绑定，
+        // 绝不与上一任正在 finish/destroy 的 VActivity 发生 key 碰撞导致数据被提前 remove；
+        // 列表自身的持久 listPageUuid 通过 ORIGIN_PAGE_UUID 传递，供 ADD_DATA/SCROLL_TO 广播认领。
+        val sessionUuid = UUID.randomUUID().toString()
+        val pageData = if (position >= 0) {
+            // nextUrl 一并交接给 VActivity，详情页 pager 划到底可以继续加载
+            PageData(
+                sessionUuid,
+                detailContinuationCursor,
+                illustItems.map { it.illust },
+            )
+        } else {
+            // 点击项已不在当前列表（刷新竞态等）：单开该作品，绝不错开成第一张。
+            // 故意用一次性 uuid：这份单作品 PageData 的 ADD_DATA/SCROLL_TO（index 0）
+            // 和主列表无关，不能被上面的接收器认领去把列表滚回顶部。
+            PageData(sessionUuid, null, listOf(item.illust))
+        }
+        Container.get().addPageToMap(pageData)
+        startActivity(Intent(requireContext(), VActivity::class.java).apply {
+            putExtra(Params.POSITION, position.coerceAtLeast(0))
+            putExtra(Params.PAGE_UUID, sessionUuid)
+            putExtra(Params.ORIGIN_PAGE_UUID, syncViewModel.listPageUuid)
+        })
+    }
+
+    /** 返回时列表跟到详情页正在看的那张（延迟一拍等转场结束）。 */
+    private fun scrollToDetailPosition(illustId: Long, pagerIndex: Int) {
+        feedBinding.feedListView.postDelayed({
+            // feedAdapter 与 _binding 在 onDestroyView 里同一条主线程语句序列先后置 null，
+            // 所以这个守卫成立即蕴含 feedBinding 可用
+            val adapter = feedAdapter ?: return@postDelayed
+            if (view == null) return@postDelayed
+            // 下标要当 adapter 位置用，只能在实际渲染的那份上找：隐藏项不进 adapter
+            val items = feedViewModel.uiState.value.visibleItems
+            // pager 的 index 是交接快照里纯插画列表的下标，列表带 header（推荐页排行榜头）
+            // 或收藏后相关作品插到中段时不能直接当 adapter 位置用，按作品 id 锚定
+            var position = if (illustId > 0) {
+                items.indexOfFirst { it is IllustFeedItem && it.illust.id == illustId }
+            } else {
+                -1
+            }
+            if (position < 0 && pagerIndex >= 0) {
+                // 广播不带 id 时的兜底：第 pagerIndex 个插画条目（跳过混排的非插画条目）
+                var remaining = pagerIndex
+                position = items.indexOfFirst { it is IllustFeedItem && remaining-- == 0 }
+            }
+            if (position in 0 until adapter.itemCount) {
+                feedBinding.feedListView.smoothScrollToPosition(position)
+            }
+        }, 200L)
+    }
+}
+
+/**
+ * 插画 feed 页跨 Fragment 重建存活的协同状态（数据归 ViewModel 约定）。
+ */
+class IllustFeedSyncViewModel : ViewModel() {
+
+    /**
+     * 本列表在 Container 里的稳定 PageData key：每次打开详情覆盖同一个坑（Container
+     * 永不清理，随机 uuid 会积攒整列表快照）；Fragment 重建后详情回传广播仍能认领。
+     */
+    val listPageUuid: String = UUID.randomUUID().toString()
+
+    /**
+     * 已合入 ObjectPool 的 bean 实例（id → 当前代实例）。刷新会产出同 id 的新实例、
+     * 携带更新的服务端数据，实例变了就要重新合入；同一实例重复扫描则跳过。
+     *
+     * ⚠️ 只挡「同一实例重复合池」。**就地改 bean 字段（如收藏态）这条 map 看不见** ——
+     * 那类变更必须由变更点自己同步池，见 [IllustFeedItem.withBookmarked]。
+     */
+    val pooledBeans = HashMap<Long, Illust>()
+}

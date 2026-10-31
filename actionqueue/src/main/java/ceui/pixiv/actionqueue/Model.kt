@@ -1,0 +1,140 @@
+package ceui.pixiv.actionqueue
+
+/**
+ * 入队请求。调用方只描述「要做什么」，不关心什么时候做。
+ *
+ * @param type       动作类型，用来在 [ActionHandler] 注册表里找执行器。
+ * @param dedupeKey  合并键，通常是 `"$type:$targetId"`。见 [coalesce]。
+ * @param payload    不透明字符串，队列不解释其内容；由注册该 [type] 的 handler 自行解析。
+ * @param coalesce   true（默认）时，入队会先删掉同 [dedupeKey] 的所有 PENDING 行再插入，
+ *                   即「同一目标只保留用户的最后一次意图」。连点爱心产生的
+ *                   收藏→取消→收藏，最终只会发出一个请求。
+ *                   已经在执行中（RUNNING）的行删不掉，此时靠 handler 幂等收敛。
+ * @param gapMs      本条执行完之后，到下一条开始执行之间的额外最小间隔。
+ *                   实际间隔取 `max(QueuePolicy.minGapMs, gapMs)`。默认 0 = 用全局值。
+ */
+public data class ActionRequest(
+    public val type: String,
+    public val dedupeKey: String,
+    public val payload: String,
+    public val coalesce: Boolean = true,
+    public val gapMs: Long = 0L,
+)
+
+/**
+ * 交给 [ActionHandler] 执行的一条动作。
+ *
+ * @param owner 入队时的归属标识（见 [ActionQueue] 的 `owner` 参数）。队列只执行归属等于
+ *              当前 owner 的行，[dedupeKey] 的合并也按 owner 分组。
+ */
+public data class PendingAction(
+    public val id: Long,
+    public val type: String,
+    public val dedupeKey: String,
+    public val payload: String,
+    /** 已经失败重试过几次。首次执行为 0。 */
+    public val attempt: Int,
+    public val owner: String = "",
+)
+
+/**
+ * 一次可重试失败的影响范围。
+ *
+ * 分这两档的理由是「这个错误说明了谁不行」：429 说明**这个账号**这段时间不能再发请求了，
+ * 那么后面排着的每一条都得等；而 400 / 401 只说明**这一条**（或这一刻的 token）不行，
+ * 把整队一起冻住只会让一条坏行连累所有人 —— 一条永远 400 的动作按默认参数能把整个队列
+ * 卡住 7.5 分钟，而队列里躺的是别的作品的收藏。
+ */
+public enum class RetryScope {
+
+    /** 整队冷却：在这条的退避时间过去之前，**任何**动作都不发。用于 429 / 5xx。 */
+    QUEUE,
+
+    /** 只推迟这一条，其余动作照常按最小间隔发。用于 400 / 401 / 403 这类单条或会话级错误。 */
+    ACTION,
+}
+
+/** [ActionHandler.execute] 的结果。把 HTTP 状态码翻译成这三种之一是调用方的责任。 */
+public sealed interface ActionOutcome {
+
+    /** 成功。该行立即从队列删除。 */
+    public data object Success : ActionOutcome
+
+    /**
+     * 可重试的失败（429 / 5xx / 网络断开）。
+     *
+     * @param retryAfterMs 响应里的 `Retry-After`（毫秒）。非空时作为冷却时长的下限，
+     *                     与指数退避取较大者。
+     * @param scope        这次失败该冻住整队还是只推迟这一条，见 [RetryScope]。默认整队 ——
+     *                     分不清的时候少发请求总比继续撞墙安全。
+     * @param countsAsAttempt 这次失败算不算消耗一次重试预算（[QueuePolicy.maxAttempts]）。
+     *        传 false 表示「这次根本没试成，不该记在这条动作头上」—— 典型是断网：请求压根
+     *        没离开设备，服务端也从没见过它。按默认参数，5 次预算配上指数退避只够撑 7.5 分钟，
+     *        也就是说坐一趟地铁回来，用户排队的收藏已经被判终态失败、回滚、弹了 toast，
+     *        而「进程被杀也能续上」的持久化承诺正是为了这种场景才存在的。
+     *        注意传 false 的失败**不会**让退避时长增长（它按未变的 attempt 算），
+     *        所以只能给「等外部条件恢复」这类原因用，别拿它兜住会一直失败的请求。
+     */
+    public data class Retry(
+        public val retryAfterMs: Long? = null,
+        public val cause: Throwable? = null,
+        public val scope: RetryScope = RetryScope.QUEUE,
+        public val countsAsAttempt: Boolean = true,
+    ) : ActionOutcome
+
+    /**
+     * 不可重试的失败（400 / 404 / 作品已删除 / 参数非法）。
+     * 该行标记为 FAILED 留在库里，不再重试，也不触发冷却。
+     */
+    public data class Fail(
+        public val reason: String,
+        public val cause: Throwable? = null,
+    ) : ActionOutcome
+}
+
+/** 队列对外广播的执行结果，供 UI 回滚乐观更新 / 提示用户。 */
+public sealed interface ActionEvent {
+
+    public val action: PendingAction
+
+    public data class Succeeded(override val action: PendingAction) : ActionEvent
+
+    /** 撞到可重试失败，已排入冷却，[retryAtMs] 之后再试。 */
+    public data class Retrying(
+        override val action: PendingAction,
+        public val retryAtMs: Long,
+        public val cause: Throwable?,
+    ) : ActionEvent
+
+    /**
+     * 终态失败：要么 handler 返回了 [ActionOutcome.Fail]，要么重试次数耗尽。
+     * **这是 UI 回滚乐观更新的唯一时机**（[ActionEvent.Retrying] 不要回滚，还会再试）。
+     *
+     * @param supersededByPending 同 [PendingAction.dedupeKey] 上还压着一条更新的待执行意图。
+     *        为 true 时**不要回滚**：用户在这条失败之前又点了一次，那条马上就要发出去，
+     *        此时回滚等于用旧结果覆盖新意图。判断「是不是同一个意图」只能靠这个标记，
+     *        比较当前值是不够的 —— 收藏→取消→收藏之后当前值和失败那条恰好相等。
+     */
+    public data class Failed(
+        override val action: PendingAction,
+        public val reason: String,
+        public val cause: Throwable?,
+        public val supersededByPending: Boolean = false,
+    ) : ActionEvent
+}
+
+/** 队列当前在干什么，给状态栏 / 调试页用。 */
+public sealed interface QueueState {
+
+    /** 没有待执行的动作。 */
+    public data object Idle : QueueState
+
+    /** 有 [pending] 条待执行，正常消费中。 */
+    public data class Working(public val pending: Int) : QueueState
+
+    /** 撞了限流或网络错误，[untilMs] 之前不会再发请求。 */
+    public data class CoolingDown(public val untilMs: Long, public val pending: Int) : QueueState
+
+    /** 被 [ActionQueue.pause] 或 gate 挡住（例如未登录）。 */
+    public data class Suspended(public val pending: Int) : QueueState
+}

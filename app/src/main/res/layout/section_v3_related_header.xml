@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:id="@+id/related_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:letterSpacing="0.12"
+            android:text="@string/v3_label_related"
+            android:textAllCaps="true"
+            android:textColor="@color/v3_text_3"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/related_see_more"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/see_more"
+            android:textColor="@color/v3_ambient_primary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/related_loading_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone">
+
+        <!-- 插画详情:相关作品是普通瀑布流卡,直接用瀑布流骨架(列数跟随「每行几列」设置,
+             8dp 间距/圆角与真卡一致)。小说详情复用本布局但后面跟的是小说卡,继续用转圈。
+             高度写死一屏多一点:骨架只是给真卡占位,拉到后本容器整块收起、相关卡从同一位置
+             接着排,所以占多高不影响最终版式,够铺满视口即可。 -->
+        <ceui.pixiv.feeds.FeedStaggeredSkeletonView
+            android:id="@+id/related_skeleton"
+            android:layout_width="match_parent"
+            android:layout_height="360dp"
+            android:visibility="gone" />
+
+        <ProgressBar
+            android:id="@+id/related_loading_spinner"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_gravity="center"
+            android:layout_marginVertical="50dp"
+            android:indeterminateTint="@color/v3_text_3" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/related_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:minHeight="200dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="64dp"
+        android:text="@string/v3_no_related_works"
+        android:textColor="@color/v3_text_3"
+        android:textSize="13sp"
+        android:visibility="gone" />
+</LinearLayout>

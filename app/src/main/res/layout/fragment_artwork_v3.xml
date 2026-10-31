@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ArtworkV3 详情页(feeds 框架版):列表本体走 <include feed_root=fragment_feed>(SwipeRefresh +
+  RecyclerView + 骨架 + 空/错态),chrome(toolbar / 页状态横幅 / 折叠胶囊 / 悬浮下载收藏胶囊 /
+  内联评论输入栏)浮在列表之上。无 <layout> 数据绑定——用 ViewBinding,Fragment(contentLayoutId)
+  普通 inflate 后 FragmentArtworkV3Binding.bind(view)。下拉刷新已关闭(refreshEnabled=false)。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/v3_bg">
+
+    <include
+        android:id="@+id/feed_root"
+        layout="@layout/fragment_feed"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/top_overlay_column"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:layout_collapseMode="pin"
+            app:navigationIcon="@drawable/ic_arrow_back_white_shadow">
+
+            <TextView
+                android:id="@+id/toolbar_title"
+                style="@style/textMontserratBold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:alpha="0.0"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:textColor="@color/v3_text_1"
+                android:textSize="18sp" />
+
+            <ImageView
+                android:id="@+id/nav_more"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="@null"
+                android:padding="10dp"
+                android:src="@drawable/ic_more_vert_black_24dp"
+                app:tint="@color/v3_text_1" />
+        </androidx.appcompat.widget.Toolbar>
+
+        <!-- 首帧必然不可见（只在有页加载失败时才亮），走 ViewStub 推迟到真有失败再建，
+             见 ArtworkV3Fragment.ensurePageStatusRow。 -->
+        <ViewStub
+            android:id="@+id/page_status_row_stub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout="@layout/view_artwork_page_status" />
+    </LinearLayout>
+
+    <!-- 右上角悬浮胶囊:一枚,里面是「收起」(仅多图展开中) + 「当前页 / 总页」读数。
+         两段各自显隐,胶囊本身只要有一段有内容就在(见 syncTopEndPill)。
+         topMargin 运行时由 top_overlay_column.bottom 驱动(见 handleSystemInsets)。 -->
+    <LinearLayout
+        android:id="@+id/top_end_pill_row"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_v3_expand_pill"
+        android:elevation="8dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <!-- 「收起」:仅多图展开中可见,整枚胶囊里只有这一段可点。 -->
+        <LinearLayout
+            android:id="@+id/collapse_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <ImageView
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_marginEnd="6dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_keyboard_arrow_up_black_24dp"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:letterSpacing="0.02"
+                android:text="@string/v3_collapse_pages_title"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- 两段之间的间隔单独用一个 Space,不挂成谁的 margin:LinearLayout 里 GONE 的子 View
+             自己不占位,但它**前一个可见兄弟**的 marginEnd 照常生效 —— 挂在任一段身上,都会在
+             另一段隐藏时让胶囊往那一侧多出 10dp、左右不对称。见 syncTopEndPill。 -->
+        <Space
+            android:id="@+id/top_end_pill_gap"
+            android:layout_width="10dp"
+            android:layout_height="1dp"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+        <!-- 常驻页码读数(#1058):多图作品直接在详情页往下滑时,标出正被它盖着的那一页。 -->
+        <TextView
+            android:id="@+id/page_progress_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:letterSpacing="0.02"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            tools:text="4 / 10"
+            tools:visibility="visible" />
+    </LinearLayout>
+
+    <!-- Floating action bar (download + bookmark),与二级大图页共用,见 view_v3_fab_bar.xml -->
+    <include
+        android:id="@+id/fab_bar"
+        layout="@layout/view_v3_fab_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="24dp" />
+
+    <!-- 评论输入浮层:平时不常驻(整条透明、输入栏 GONE),点评论区「留下你的评论吧」入口才浮出。
+         浮层本体走 ViewStub:它含一个 ViewPager2,整棵 inflate 掉近百毫秒,而详情页首帧还要连带
+         相邻页(offscreenPageLimit=1)一起付;首帧既不可见也用不上,故推迟到首次唤出
+         (见 ArtworkV3Fragment.ensureComposer)。 -->
+    <LinearLayout
+        android:id="@+id/composer_root"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical">
+
+        <ViewStub
+            android:id="@+id/comment_composer_stub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout="@layout/view_comment_composer_host" />
+    </LinearLayout>
+
+    <!-- 已屏蔽遮罩：只有被屏蔽的作品才亮，子树里还挂着 SpoilerBlurView(两个自定义 View)。
+         首帧替每个作品都建一份纯属浪费，改 ViewStub，见 ArtworkV3Fragment.ensureAbandonedFrame。 -->
+    <ViewStub
+        android:id="@+id/abandoned_frame_stub"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout="@layout/view_artwork_abandoned" />
+
+    <!-- AI 画质增强 / 智能抠图共用覆盖层(加载中进度 + 完成态)，与经典 FragmentIllust 同一份布局。
+         只在跑 AI 任务时才用得上，改 ViewStub —— 目标布局 view_ai_upscale_overlay.xml 本身是单根，
+         可直接当 android:layout。触发见 IllustAiHelper 的 ensureOverlay 回调。 -->
+    <ViewStub
+        android:id="@+id/ai_overlay_stub"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout="@layout/view_ai_upscale_overlay" />
+
+</FrameLayout>

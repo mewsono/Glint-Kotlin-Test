@@ -1,0 +1,481 @@
+package ceui.pixiv.ui.common
+
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.content.res.ColorStateList
+import android.content.res.Resources
+import android.graphics.Color
+import android.view.animation.OvershootInterpolator
+import android.widget.ImageView
+import androidx.core.content.ContextCompat
+import androidx.core.view.isVisible
+import ceui.lisa.R
+import ceui.lisa.activities.Shaft
+import ceui.lisa.adapters.IllustAdapter
+import ceui.lisa.helper.IllustNovelFilter
+import ceui.lisa.transformer.CpuBlurTransformation
+import ceui.pixiv.ui.bookmark.SelectTagBottomSheet
+import ceui.lisa.databinding.RecyIllustStaggerBinding
+import ceui.pixiv.api.model.Illust
+import ceui.lisa.utils.GlideUtil
+import ceui.lisa.utils.Params
+import ceui.pixiv.feeds.FeedRenderer
+import ceui.pixiv.feeds.feedRenderer
+import ceui.pixiv.ui.recommend.formatTrendingScore
+import ceui.pixiv.widget.IllustBadgeRowView
+import ceui.pixiv.utils.playLikePressHaptic
+import ceui.pixiv.utils.playUnlikeHaptic
+import ceui.pixiv.utils.setOnClick
+import com.bumptech.glide.load.model.GlideUrl
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
+import com.bumptech.glide.request.RequestOptions.bitmapTransform
+
+/** 瀑布流卡片高度钳制（对齐 legacy IAdapter）：高 = 宽的 0.6~2.0 倍。 */
+private const val MIN_HEIGHT_RATIO = 0.6f
+private const val MAX_HEIGHT_RATIO = 2.0f
+
+/**
+ * 极端高宽比阈值：比例超过该值视为“离谱”，缩略图改走 square_medium。
+ *
+ * 只看比例、不看原图宽：pixiv 的 medium / large 是按 540x540 / 600x1200 的盒子等比缩进去的，
+ * 缩略图实际宽 = 540/比例（medium）或 1200/比例（large），**与原图宽无关** —— 一张
+ * 3000x13000 的图 medium 也只有 125px 宽。比例 > 4 时缩略图宽必 ≤ 135 / 300px，
+ * 无论列宽多少都会被 centerCrop 横向拉糊，所以不需要再拿原图宽和列宽比一次。
+ */
+private const val EXTREME_HEIGHT_RATIO = 4f
+
+/** 屏蔽态的 Glide 模糊参数（对齐画师头图 [ceui.pixiv.ui.muted] 那套 25/3，够糊到认不出内容）。 */
+private const val SPOILER_BLUR_RADIUS = 25
+private const val SPOILER_BLUR_SAMPLING = 3
+
+/**
+ * 「屏蔽此作品」态变化的局部重绑 payload（按引用识别）。
+ *
+ * 和 [PAYLOAD_ILLUST_LIKE_CHANGED] 不同，它**不来自 DiffUtil**：屏蔽态的真源是
+ * [IllustMuteStore]（Room 屏蔽记录的内存镜像），不在 [IllustFeedItem] 上，
+ * 条目内容压根没变。由 [IllustFeedFragment.setIllustMuted] 直接
+ * `notifyItemChanged(pos, payload)` 派发，另由订阅 [IllustMuteStore.revisionLive] 的
+ * `IllustFeedFragment.observeMuteRevision` 给全页插画卡补发（别处改了名单时）。
+ *
+ * 为什么屏蔽态不进条目：进了就得让每个 `IllustFeedItem` 构造点都带上它、还要在
+ * [IllustFeedItem.withBookmarked] 里手动接力；更要命的是**别的页面早已构造好的条目会揣着
+ * 过期值**（同一作品在收藏页/搜索页各有一份条目实例）。放名单里、bind 时现读，任何页面滑动
+ * 复用一次就自动同步。
+ */
+internal val PAYLOAD_ILLUST_SPOILER_CHANGED = Any()
+
+/**
+ * 「显示收藏按钮」设置变了的局部重绑标记：只重算爱心的可见性，不碰图和角标。
+ * 同样不来自 DiffUtil，由 [IllustFeedFragment.onResume] 比对 [IllustFeedFragment.boundHideLikeButton] 后发出。
+ */
+internal val PAYLOAD_ILLUST_LIKE_VISIBILITY_CHANGED = Any()
+
+/**
+ * Glide 请求去重 key（存在 ImageView 的 tag 上）。带 [blurred]：屏蔽态切换时 URL 和尺寸都没变，
+ * 少了这一维就会因为 key 相等而跳过重新加载，图永远不糊/不清。
+ */
+private data class IllustImageRequestKey(
+    val cacheKey: String?,
+    val width: Int,
+    val height: Int,
+    val blurred: Boolean,
+)
+
+/**
+ * 标准瀑布流插画卡（recy_illust_stagger，与 legacy IAdapter 同一张布局同一套行为）：
+ * NP 页数 / GIF / R-18 / AI / NEW 角标、爱心收藏（局部重绑）、爱心长按进「按标签收藏」、
+ * 点击开详情、长按弹卡片菜单，比例钳制 0.6~2.0。
+ *
+ * 从 [IllustFeedFragment] 搬出来单独放一个文件（对齐 [ceui.pixiv.ui.comments.commentCardRenderer]
+ * 的既有做法）：「数据怎么画」不挤在 Fragment 里，Fragment 只管编排。
+ *
+ * 是 [IllustFeedFragment] 的扩展函数而非顶层函数：renderer 只在 `onCreateRenderers()` 里建一次、
+ * 随 view 生死（[FeedFragment.onDestroyView] 清 adapter），引用 Fragment 安全 —— 不违反
+ * `feedViewModels` 的零捕获约定（那条约定管的是 VM 长期持有的 FeedSource / mapper）。
+ */
+internal fun IllustFeedFragment.staggerIllustRenderer():
+        FeedRenderer<IllustFeedItem, RecyIllustStaggerBinding> =
+    feedRenderer<IllustFeedItem, RecyIllustStaggerBinding>(
+        inflate = RecyIllustStaggerBinding::inflate,
+        create = { cell ->
+            cell.binding.root.setOnClick {
+                val tapped = cell.itemOrNull ?: return@setOnClick
+                // 打码的卡：点一下 = 取消屏蔽（删掉那条屏蔽记录），当帧还原成正常卡，
+                // 再点才开详情。不直接开详情——否则「屏蔽」等于没屏蔽，手一滑就把刚遮住的
+                // 东西整屏铺开了。与长按菜单「取消屏蔽此作品」走的是同一个口。
+                val locallySpoilered = IllustMuteStore.isMuted(tapped.illust.id)
+                if (locallySpoilered) {
+                    setIllustMuted(tapped, false)
+                } else {
+                    openDetail(tapped)
+                }
+            }
+            cell.binding.root.setOnLongClickListener {
+                showCardMenu(cell.item)
+                true
+            }
+            cell.binding.likeButton.setOnClick {
+                // 收藏态的真源是 VM 的当前状态，不是 cell.item —— 后者是 adapter **已提交的快照**，
+                // 要等 ListAdapter 后台 diff 落地才经 cell.attach 换新（下面那段注释自己写了「至少
+                // 1~2 帧，大列表更久」）。而 uiState.value 是同步就绪的。读 cell.item 的后果：连点
+                // 两下时第二下仍看到上一下之前的旧态，把「取消收藏」反转成「再收藏一次」——心不回白、
+                // 烟花重放、两条 toast、两次 addBookmark，取消这个操作直接丢失。
+                val tapped = cell.itemOrNull ?: return@setOnClick
+                val current = currentIllustItem(tapped.illust.id) ?: return@setOnClick
+                val willBookmark = current.illust.is_bookmarked != true
+                toggleLike(current)
+                // 乐观重绑要等 ListAdapter 后台 diff 落地（至少 1~2 帧，大列表更久），
+                // 静态爱心必须当帧先切到目标态：否则爆发动画开头几帧红心还小，
+                // 底下过期的白色空心心会从边缘漏出来；随后的 payload 重绑是幂等兜底
+                renderLikeState(cell.binding.likeButton, willBookmark)
+                if (willBookmark) {
+                    playLikeBurst(cell.binding)
+                } else {
+                    playUnlikeShrink(cell.binding.likeButton)
+                }
+            }
+            // 动画播完/被取消都收起爆发层，露出下面已经变红的静态爱心
+            cell.binding.likeAnim.addAnimatorListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    cell.binding.likeAnim.isVisible = false
+                }
+            })
+            // lottie 默认 failure listener 会直接抛 IllegalStateException 崩 app；
+            // 动画资源解析失败就静默降级成无动画（静态爱心链路完全不受影响）
+            cell.binding.likeAnim.setFailureListener { }
+            // 爱心长按 → 按标签收藏（对齐 IAdapter）
+            cell.binding.likeButton.setOnLongClickListener {
+                val bean = cell.item.illust
+                SelectTagBottomSheet.show(
+                    this@staggerIllustRenderer, bean.id, Params.TYPE_ILLUST, bean.tagNames.toTypedArray(),
+                )
+                true
+            }
+        },
+        recycle = { cell ->
+            // 淡入淡出可能正跑到一半就被回收：连 animator 一起停掉并把 alpha 归位，
+            // 否则复用到下一条目时粒子层带着半透明残值出场
+            cell.binding.spoilerParticles.animate().cancel()
+            cell.binding.spoilerParticles.alpha = 1f
+            cell.binding.spoilerParticles.setParticleAnimationRunning(false)
+            illustGlide.clear(cell.binding.illustImage)
+            cell.binding.illustImage.tag = null
+            resetLikeAnim(cell.binding)
+        },
+        attach = { cell ->
+            val spoilered = cell.itemOrNull?.let {
+                IllustMuteStore.isMuted(it.illust.id) || IllustNovelFilter.shouldBlurAi(it.illust)
+            }
+            if (spoilered == true) {
+                cell.binding.spoilerParticles.setParticleAnimationRunning(true)
+            }
+        },
+        detach = { cell ->
+            cell.binding.spoilerParticles.setParticleAnimationRunning(false)
+        },
+        changePayload = ::illustLikeChangePayload,
+        bindPayloads = { cell, payloads ->
+            // RecyclerView 会把同一帧内的多个 payload 攒在一起给同一个 holder，
+            // 所以逐个认领而不是二选一；混进不认识的就整体退回全量绑定
+            val known = payloads.all {
+                it === PAYLOAD_ILLUST_LIKE_CHANGED || it === PAYLOAD_ILLUST_SPOILER_CHANGED ||
+                        it === PAYLOAD_ILLUST_LIKE_VISIBILITY_CHANGED
+            }
+            if (known) {
+                if (payloads.any { it === PAYLOAD_ILLUST_LIKE_CHANGED }) {
+                    renderLikeState(cell.binding.likeButton, cell.item.illust.is_bookmarked == true)
+                }
+                if (payloads.any { it === PAYLOAD_ILLUST_SPOILER_CHANGED }) {
+                    val bean = cell.item.illust
+                    // 一律用 illust.id（Long）当名单 key：legacy bean.id 是 int，
+                    // 两边混着用早晚会在同一份名单里对不上号
+                    val spoilered = IllustMuteStore.isMuted(cell.item.illust.id) ||
+                            IllustNovelFilter.shouldBlurAi(cell.item.illust)
+                    loadIllustImage(cell.binding, bean, spoilered)
+                    // 这条路径是用户刚点下「屏蔽 / 取消屏蔽」的那一下：粒子淡进淡出，
+                    // 跟 Glide 换图的 crossfade 同步，不要硬切
+                    renderSpoilerParticles(
+                        cell.binding.spoilerParticles,
+                        show = spoilered,
+                        animate = true,
+                    )
+                    // 叠在图上的操作层跟着屏蔽态走。和全量绑定共用同一分支，两边永远一致
+                    applyIllustSpoilerMask(cell.binding, spoilered)
+                } else if (payloads.any { it === PAYLOAD_ILLUST_LIKE_VISIBILITY_CHANGED }) {
+                    applyIllustSpoilerMask(
+                        cell.binding,
+                        IllustMuteStore.isMuted(cell.item.illust.id) ||
+                                IllustNovelFilter.shouldBlurAi(cell.item.illust),
+                    )
+                }
+                true
+            } else {
+                false
+            }
+        },
+    ) { cell ->
+        val bean = cell.item.illust
+        cell.binding.illustImage.setHeightRatio(displayRatioOf(bean))
+
+        // 「这条算不算 AI」一次 bind 只问一次：标签规则要逐条规范化比较，是这条链路上最贵的一步。
+        // 打码判定与 AI 角标都从这一份结果上取，别让同一张卡把标签匹配跑两遍。
+        val aiWork = IllustNovelFilter.isAiWork(bean)
+        val excludeAi = Shaft.sSettings.isDeleteAIIllust
+        // 打码与否的真源是本地屏蔽名单 + AI 屏蔽强度，bind 时现读：别的页面改了屏蔽/设置，
+        // 本页滑动复用一次就跟上（条目本身不带这个状态，见 PAYLOAD_ILLUST_SPOILER_CHANGED 的注释；
+        // 没被回收的卡由 IllustFeedFragment.observeMuteRevision 补绑）
+        val spoilered = IllustMuteStore.isMuted(cell.item.illust.id) ||
+                IllustNovelFilter.shouldBlurAi(bean, excludeAi, aiWork)
+        // 粒子层只跟屏蔽态走：没被屏蔽的卡一律不画。之前首页推荐是「全员开」，
+        // 整屏卡片都在跑逐帧粒子——既看不出是装饰还是屏蔽提示，也白烧一屏的帧。
+        // View 本身不 clickable，不会截走卡片点击/长按。
+        // 预取阶段即使完成 bind，也要等 holder attach 后才真正开始逐帧模拟。
+        renderSpoilerParticles(
+            cell.binding.spoilerParticles,
+            show = spoilered,
+            animate = false,
+        )
+        loadIllustImage(cell.binding, bean, spoilered)
+
+        // 角标行整行交给自绘 View（原本是 7 个 TextView，每张卡无条件建一遍）。
+        // 顺序与原布局一致：站长推荐 -> R-18 -> 页数 -> W -> GIF -> AI -> NEW。
+        cell.binding.badgeRow.setBadges(buildBadges(bean, cell.binding.root.resources, aiWork))
+        // 全量绑定可能是复用的卡换了条目：上一条残留的爆发动画/缩放必须清干净
+        resetLikeAnim(cell.binding)
+        renderLikeState(cell.binding.likeButton, cell.item.illust.is_bookmarked == true)
+        // 放在最后：这一步会按屏蔽态覆盖上面那批角标行 / 爱心的可见性
+        applyIllustSpoilerMask(cell.binding, spoilered)
+    }
+
+/**
+ * 屏蔽态下把**叠在作品图上的整层**藏掉：收藏爱心（连同它的爆发动画层）和角标行
+ * （站长推荐 / R-18 / 页数 / 宽图 / GIF / AI / NEW）。对齐小说卡的 `applyNovelSpoilerMask`。
+ *
+ * 少了这一步，屏蔽只糊了图：R-18、页数、AI 这些信息照样写在卡上（图糊了角标还在就漏了一半），
+ * 而且爱心还能点——能给一件自己刚屏蔽掉的作品收藏，长按还能进「按标签收藏」。
+ *
+ * 只切**整行/整个按钮**的可见性，不碰每个角标各自的显隐（那是上面全量绑定按作品算的）：
+ * 取消屏蔽走局部重绑时不会重算角标，把行放回来就能恢复成正确的那一套。爱心的可见性是
+ * 两个条件的与——屏蔽态之外还有 [IllustFeedFragment.hideLikeButton]（全局「插画列表显示收藏按钮」
+ * + 自己收藏页的「收藏页隐藏收藏按钮」），漏掉它会让那些页面在取消屏蔽后凭空多出一颗爱心。
+ *
+ * 爆发动画层单独收一次：屏蔽发生在 lottie 正播到一半时（长按菜单点屏蔽），只藏爱心的话
+ * 那 72dp 的动画层会继续在糊掉的图上炸完。
+ */
+private fun IllustFeedFragment.applyIllustSpoilerMask(
+    binding: RecyIllustStaggerBinding,
+    masked: Boolean,
+) {
+    val hide = hideLikeButton
+    boundHideLikeButton = hide
+    binding.badgeRow.isVisible = !masked
+    binding.likeButton.isVisible = !masked && !hide
+    if (masked) {
+        resetLikeAnim(binding)
+    }
+}
+
+/**
+ * 只按元数据驱动宽高比（钳到宽的 0.6~2.0 倍，对齐 IAdapter），不等 Glide 量像素；
+ * 宽度交给瀑布流列自身，DynamicHeightImageView 在 onMeasure 用真实列宽算高——
+ * 绝不写死像素尺寸，否则复用卡片在横竖屏切换后揣着旧方向的尺寸把整列搞乱。
+ */
+internal fun heightRatioOf(bean: Illust): Float {
+    return if (bean.width > 0 && bean.height > 0) {
+        (bean.height.toFloat() / bean.width.toFloat())
+            .coerceIn(MIN_HEIGHT_RATIO, MAX_HEIGHT_RATIO)
+    } else {
+        1f
+    }
+}
+
+/**
+ * 卡片按当前列表布局的展示高宽比：方格恒为 1:1，其余沿用钳制后的原比例 —— 齐行布局靠的正是
+ * 「宽按比例分、高按同一比例量」才同行等高，见 [JustifiedLayoutManager]。
+ */
+private fun IllustFeedFragment.displayRatioOf(bean: Illust): Float =
+    if (illustListLayout == IllustListLayout.GRID) 1f else heightRatioOf(bean)
+
+/**
+ * 插画缩略图取图策略（瀑布流 / 浏览记录等共用）：
+ * - 比例离谱（见 [EXTREME_HEIGHT_RATIO]）→ 改用 square_medium（缺失时回退 medium）；
+ * - 否则正常走 large/medium，centerCrop 裁剪由调用方原有逻辑处理。
+ */
+internal fun resolveIllustThumbnailUrl(
+    bean: Illust,
+    preferLarge: Boolean = Shaft.sSettings.isShowLargeThumbnailImage,
+): GlideUrl? {
+    if (bean.width > 0 && bean.height > 0 && shouldUseSquareThumb(bean)) {
+        return GlideUtil.getUrl(
+            bean.image_urls?.square_medium?.takeIf { it.isNotBlank() }
+                ?: bean.image_urls?.medium
+        )
+    }
+    if (preferLarge) {
+        return GlideUtil.getLargeImage(bean)
+    }
+    return GlideUtil.getMediumImg(bean)
+}
+
+private fun shouldUseSquareThumb(bean: Illust): Boolean =
+    bean.height.toFloat() / bean.width > EXTREME_HEIGHT_RATIO
+
+/**
+ * 卡片图加载。全量绑定和「屏蔽态切换」的局部重绑共用同一条路径，两边参数必须逐字一致 ——
+ * 否则局部重绑刚换的图会被下一次全量绑定按不同的 key 再拉一遍（白闪一次）。
+ */
+private fun IllustFeedFragment.loadIllustImage(
+    binding: RecyIllustStaggerBinding,
+    bean: Illust,
+    spoilered: Boolean,
+) {
+    // 取图策略统一走共享解析：large（开关开） / medium（常规） / square_medium（极端高宽比兜底）。
+    val columnWidth = illustColumnWidthPx
+    val displayRatio = displayRatioOf(bean)
+    // 单列全宽时 medium（540px 盒）铺满整屏宽会发糊，固定取 large（同 pixiv-viewer 的 VirtualSlide）
+    val imgUrl = resolveIllustThumbnailUrl(
+        bean,
+        preferLarge = illustListLayout == IllustListLayout.SINGLE_COLUMN ||
+                Shaft.sSettings.isShowLargeThumbnailImage,
+    )
+    // 请求尺寸必须显式 override：into(ImageView) 对 centerCrop 会在解码阶段按「请求尺寸」
+    // 的宽高比裁位图，而默认请求尺寸取复用卡片上一次布局残留的旧宽高（旧方向的列宽 ×
+    // 上一张图的比例），横竖屏来回切后图会被裁得只剩一小块还发糊，且 view 重新量高后
+    // Glide 不会重发请求。override 成当前列宽 × 钳制后比例，请求宽高比恒等于展示宽高比。
+    // 齐行布局里卡宽随比例变、行高 ≈ 目标行高：按行高反推宽，宽图才不会按窄列宽解码后被拉糊
+    val requestWidth: Int
+    val columnHeight: Int
+    if (illustListLayout == IllustListLayout.JUSTIFIED) {
+        columnHeight = (columnWidth * JUSTIFIED_ROW_HEIGHT_FACTOR).toInt()
+        requestWidth = (columnHeight / displayRatio).toInt().coerceAtLeast(1)
+    } else {
+        requestWidth = columnWidth
+        columnHeight = (columnWidth * displayRatio).toInt()
+    }
+    // GlideUrlChild 每次构造都带当前时间戳请求头（PixivHeaders.x-client-time/hash），
+    // 而 GlideUrl.equals() 要求 headers 也相等才算「同一请求」——这里的 headers 又是个
+    // 没重写 equals 的 lambda，Glide 自己的活跃资源缓存永远认不出「这张图已经在显示」。
+    // 本地优先冷启（缓存快照 → 网络新数据）时 Illust.total_view/total_bookmarks 几乎
+    // 必然变了（这两个字段卡片根本不展示），触发全量重绑，重绑一律重新发 Glide 请求，
+    // 于是每张卡片的图都要闪一次占位色再淡入回来——图其实没变。用请求 URL（不含
+    // headers 的 cacheKey）+ 目标尺寸 + 模糊与否当 tag，真没变时跳过这次重新加载；
+    // recycle 清图时一并清 tag，保证真正复用到新条目时不会因为 tag 恰好没变而漏加载。
+    val requestKey = IllustImageRequestKey(imgUrl?.cacheKey, requestWidth, columnHeight, spoilered)
+    if (binding.illustImage.tag == requestKey) return
+    binding.illustImage.tag = requestKey
+
+    // 这里曾经挂过一个 .error(...) 兜底：它加载的是**同一个 imgUrl**，参数逐字相同 ——
+    // 也就是把刚失败的请求原样再发一遍。而 .error() 收的是已经建好的 RequestBuilder，
+    // 参数急切求值，于是 100% 的加载都要多付一整条 builder + 一次 Glide.with 的代价，
+    // 只有「瞬时网络抖动」这不到 1% 的情形能受益（404 则是稳定失败两次）。已删。
+    var request = illustGlide
+        .load(imgUrl)
+        .override(requestWidth, columnHeight)
+    if (spoilered) {
+        // 屏蔽态让 Glide 直接出一张模糊位图：变换进 cacheKey，与原图各存各的，滚回来是缓存命中。
+        // 不用 View 层模糊（RenderEffect / 自绘）——那类做法在瀑布流复用里每帧都要重算，
+        // 而这里的内容是静态的，糊一次存起来就够了。
+        request = request.apply(
+            bitmapTransform(CpuBlurTransformation(SPOILER_BLUR_RADIUS, SPOILER_BLUR_SAMPLING))
+        )
+    }
+    request
+        // 占位底色对齐白天骨架图（feed_skeleton_block），未加载卡不再白页糊一片
+        .placeholder(ceui.pixiv.feeds.R.color.feed_skeleton_block)
+        .transition(DrawableTransitionOptions.withCrossFade())
+        .into(binding.illustImage)
+}
+
+/** 未收藏 = 白色空心描边爱心，已收藏 = 红色实心爱心（图上永远配深色圆底座）。 */
+internal fun renderLikeState(button: ImageView, liked: Boolean) {
+    button.setImageResource(
+        if (liked) R.drawable.ic_like_heart_fill else R.drawable.ic_like_heart_outline
+    )
+    button.imageTintList = ColorStateList.valueOf(
+        if (liked) {
+            ContextCompat.getColor(button.context, R.color.has_bookmarked)
+        } else {
+            Color.WHITE
+        }
+    )
+}
+
+/**
+ * 角标行的内容与顺序，逐项对应原布局那 7 个 TextView（见 [IllustBadgeRowView]）。
+ * 只放「这一条作品确实要显示」的角标 —— 空位不再各建一个 View。
+ *
+ * [aiWork] 由调用方算好传入：同一次 bind 里打码判定已经问过「算不算 AI」，
+ * 这里不再重复跑标签规则。
+ */
+private fun buildBadges(
+    bean: Illust,
+    res: Resources,
+    aiWork: Boolean,
+): List<IllustBadgeRowView.Badge> {
+    val out = ArrayList<IllustBadgeRowView.Badge>(4)
+    // 只有 trending repo 注入 trendingScore，其他页 null 走「不显示」（对齐 IAdapter 复用语义）
+    formatTrendingScore(bean.trendingScore)?.let {
+        out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_trending_score, it), amber = true)
+    }
+    if (bean.isR18File()) {
+        out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_r18))
+    }
+    if (bean.page_count > 1) {
+        out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_pages, bean.page_count))
+    }
+    // 宽图角标：详情页会进全景（横向可拖）的图。缩略图按 0.6 钳比例居中裁，两侧内容在卡上看不到
+    if (!bean.isGif() && IllustAdapter.isPanoramaSize(res, bean.width, bean.height)) {
+        out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_panorama))
+    }
+    if (bean.isGif()) out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_gif))
+    // AI 角标：官方 ai_type==2 或标签命中（issue #1252，与屏蔽/详情页同口径）。
+    // 判定结果由 bind 传进来，角标这里不再跑一遍标签规则。
+    if (aiWork) {
+        out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_ai))
+    }
+    if (bean.isRelated) out += IllustBadgeRowView.Badge(res.getString(R.string.illust_badge_related))
+    return out
+}
+
+/**
+ * 收藏爆发动画：静态爱心由点击处当帧切红（异步乐观重绑只是兜底，等它就晚了），
+ * 上层 72dp Lottie 播弹性爱心 + 白闪 + 冲击波圆环 + 三色粒子向作品图上炸开，
+ * 播完自动收起。动画层非 clickable，播放中不挡按钮点击；局部重绑只动静态爱心，
+ * 不打断动画。
+ */
+private fun playLikeBurst(binding: RecyIllustStaggerBinding) {
+    playLikePressHaptic(binding.likeButton)
+    binding.likeAnim.apply {
+        // 懒加载（见 recy_illust_stagger 里 like_anim 的注释）。只在还没有 composition 时设置：
+        // setAnimation 会先 clearComposition，已加载过再调会打断正在播的动画。首次加载未完成时
+        // playAnimation 会排进 lottie 的待执行队列，加载完自动开播。
+        if (composition == null) {
+            setAnimation(R.raw.like_heart_burst)
+        }
+        isVisible = true
+        progress = 0f
+        playAnimation()
+    }
+}
+
+/** 取消收藏：静态爱心一个干脆的回弹缩放，不放烟花；触感只给单下轻 tick。 */
+private fun playUnlikeShrink(button: ImageView) {
+    playUnlikeHaptic(button)
+    button.animate().cancel()
+    button.scaleX = 0.6f
+    button.scaleY = 0.6f
+    button.animate()
+        .scaleX(1f)
+        .scaleY(1f)
+        .setDuration(280L)
+        .setInterpolator(OvershootInterpolator(2.5f))
+        .start()
+}
+
+private fun resetLikeAnim(binding: RecyIllustStaggerBinding) {
+    binding.likeAnim.cancelAnimation()
+    binding.likeAnim.isVisible = false
+    binding.likeButton.animate().cancel()
+    binding.likeButton.scaleX = 1f
+    binding.likeButton.scaleY = 1f
+}

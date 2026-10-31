@@ -1,0 +1,1424 @@
+package ceui.lisa.activities;
+
+import static ceui.lisa.R.id.nav_gallery;
+import static ceui.lisa.R.id.nav_slideshow;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.content.ActivityNotFoundException;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.Color;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.TextUtils;
+import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewTreeObserver;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import androidx.activity.BackEventCompat;
+import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.PickVisualMediaRequest;
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.splashscreen.SplashScreen;
+import androidx.core.view.GravityCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.ViewGroupCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.fragment.app.Fragment;
+import androidx.lifecycle.LiveData;
+import androidx.lifecycle.MutableLiveData;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+import androidx.viewpager.widget.ViewPager;
+
+import ceui.lisa.R;
+import ceui.lisa.core.Manager;
+import ceui.lisa.databinding.ActivityCoverBinding;
+import ceui.lisa.fragments.FragmentCenter;
+import ceui.lisa.fragments.FragmentLeft;
+import ceui.lisa.fragments.FragmentRight;
+import ceui.lisa.fragments.FragmentViewPager;
+import ceui.lisa.helper.DrawerLayoutHelper;
+import ceui.lisa.helper.DrawerPredictiveBack;
+import ceui.lisa.helper.NavigationLocationHelper;
+import ceui.lisa.helper.PredictiveBackSuppressor;
+import ceui.lisa.utils.Common;
+import ceui.lisa.utils.Dev;
+import ceui.lisa.utils.GlideUtil;
+import ceui.lisa.utils.Params;
+import ceui.lisa.utils.ReverseImage;
+import ceui.lisa.view.DrawerLayoutViewPager;
+import ceui.pixiv.config.RemoteAppConfig;
+import ceui.pixiv.push.InAppPushCenter;
+import ceui.pixiv.services.ServicesProvider;
+import ceui.pixiv.session.SessionManager;
+import ceui.pixiv.shaftapi.Nana7miPlan;
+import ceui.pixiv.ui.me.MeFragment;
+import ceui.pixiv.ui.navigation.BottomBarAutoHide;
+import ceui.pixiv.ui.navigation.DrawerIconCatalog;
+import ceui.pixiv.ui.navigation.HomeShellHost;
+import ceui.pixiv.ui.navigation.TemplateRoute;
+import ceui.pixiv.witstudio.dialog.WitDialog;
+import ceui.pixiv.witstudio.dialog.WitDialogAction;
+
+import com.blankj.utilcode.util.BarUtils;
+import com.bumptech.glide.Glide;
+
+/** 主页 */
+public class MainActivity extends BaseActivity<ActivityCoverBinding>
+        implements ColdStartSplashHost, HomeShellHost {
+
+    public static final String[] ALL_SELECT_WAY = new String[] {"图库选图", "文件管理器选图"};
+    private long mExitTime;
+    private static final long EXIT_WINDOW_MS = 2000;
+    private OnBackPressedCallback mainBackCallback;
+    private DrawerPredictiveBack drawerPredictiveBack;
+    private BottomBarAutoHide bottomBarAutoHide;
+    private Fragment[] baseFragments = null;
+    // 与 baseFragments 一一对应的底部菜单 item id;TAB 顺序可配置后,
+    // id 和位置的关系不再固定,所有 id<->position 换算都查这张表
+    private int[] tabMenuIds = null;
+
+    /** 宽窗口下侧边导航栏代替底栏（#1087），见 {@link #applyNavigationMode}。 */
+    private final MutableLiveData<Boolean> navigationRailShown = new MutableLiveData<>(false);
+
+    /** 最近一次已持久化的底部导航位置；用于去重，避免同一位置反复写 MMKV。 */
+    private int lastPersistedNavigationPosition = -1;
+
+    /**
+     * 上次建抽屉时的可变门控输入（见 {@link #buildDrawerMenu()}）；null = 还没建过。 onResume 每次都会请求重建，输入没变就跳过：
+     * 整组 removeAllViews + 二十多行 inflate 会在每次从详情页返回时白跑一遍。
+     */
+    @Nullable private String drawerMenuInputs = null;
+
+    /**
+     * 抽屉菜单是否已过「首帧之后」这道闸（见 {@link #buildDrawerMenu()}）。
+     *
+     * <p>整组 removeAllViews + 二十多行 inflate 冷启动实测 226ms，而抽屉在冷启动时是关着的、
+     * 用户根本看不到——没必要挤在首页首帧里。首帧前无论谁请求（initView 的首次调用、
+     * referralEnabledLive 注册时的立即回调、onResume、profileReady 广播）都先挡住，
+     * 等首帧画完由 {@code initView} 排的那一帧统一补建一次。
+     */
+    private boolean drawerMenuReady = false;
+
+    /** {@link #leaveDrawerThen} 已排上、还没执行的那次出场;非 null 时再点抽屉条目一律忽略。 */
+    private Runnable pendingDrawerLeave;
+
+    /**
+     * 首帧之后逐帧跑的活（放行停在 CREATED 的 tab 页、建抽屉菜单），每帧只跑一个。
+     *
+     * <p>两者都必须落在首帧之后（一个用户看不到、一个要滑出抽屉才看得到），但如果各自
+     * {@code postOnAnimation}，会撞进同一帧的 ANIMATION 阶段、合成一条几百毫秒的消息——
+     * 那和没延迟没区别（patch-10-10-4 踩过同一个坑，见其 PR 的「为什么需要 FrameQueue」）。
+     * 队列保证每帧只跑一个。
+     */
+    private final java.util.ArrayDeque<Runnable> firstFrameTasks = new java.util.ArrayDeque<>();
+
+    private boolean firstFramePumpRunning = false;
+
+    private boolean firstFrameReached = false;
+
+    /**
+     * 开屏放行后首页是否已「站稳」（见 {@link #settleThenStartFirstFrameTasks()}）：逐帧队列的第三道闸。
+     *
+     * <p>开屏放行时 feed 只是刚把缓存条目提交进 adapter：列表的 layout、首屏卡片 / 榜单条的
+     * 图片解码都还在后面几帧里。系统的开屏淡出动画（约 200ms）正好盖住这段——前提是主线程
+     * 这时空着。队列一开跑，放行 tab 页（实测 FragmentCenter 几十～两百多 ms）就会把这几帧
+     * 顶掉，用户在淡出之后看到的是「空白页 → 没图的灰卡片 → 内容」。
+     */
+    private boolean postSplashSettled = false;
+
+    private boolean postSplashSettleArmed = false;
+
+    /**
+     * 首页推荐这次冷启动的刷新是否已收尾（网络首屏到了 / 失败了 / 停在快照上），逐帧队列要等它。
+     *
+     * <p>开屏放行时首页通常还挂着顶部刷新圈在等网络。这段时间里放行 tab 页不只是自己占主线程，
+     * 被放行的页还会立刻各自拉数据、回来就上屏，和首页网络首屏的整代替换撞在同一段——
+     * 联网冷启动实测转圈期间连续十来帧 40~116ms，刷新圈肉眼可见地卡；revert 前这些页在
+     * 开屏后面就建好了，转圈期间只有首页自己那 1~2 帧。启动页不是首页推荐时没人回报，直接视为已收尾。
+     *
+     * <p>不设超时：网络请求自带超时，refresh 总会离开 Loading；万一真没等到，队列里的活也都有
+     * 按需路径——切到某个 tab 时 setPrimaryItem 当场把它提到 RESUMED，拉抽屉时就地建菜单
+     * （见 onDrawerStateChanged）。拍一个超时反而会在慢网络下把队列放进还在转圈的那段。
+     */
+    private boolean homeRefreshSettled = false;
+
+    /**
+     * 开屏放行后的首帧画完，再留多久给首页 layout + 首屏图片解码，才开始跑逐帧队列。
+     *
+     * <p>覆盖系统开屏淡出（约 200ms）外加首屏图片从磁盘解码上屏；队列里都是用户看不到的活
+     * （其它 tab 页、抽屉菜单），晚这几百毫秒没有可见代价。
+     */
+    private static final long POST_SPLASH_SETTLE_MS = 300L;
+
+    /**
+     * 开屏动画安全兜底超时：万一首页推荐插画 tab 没能按预期跑到（异常 / 未来改了默认 tab），也不能让开屏永久卡住——超时后强制放行，最坏情况退化回「开屏消失后闪一帧 常规
+     * loading」，而不是白屏假死。splashResolved 本身没有超时保护，靠这里兜底。
+     */
+    private static final long SPLASH_SAFETY_TIMEOUT_MS = 1200L;
+
+    /** 开屏是否已放行。实例字段：每个 MainActivity 实例天然从 false 起，不需要 reset。 */
+    private volatile boolean splashResolved = false;
+
+    private final android.content.BroadcastReceiver profileReadyReceiver =
+            new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(android.content.Context context, Intent intent) {
+                    android.util.Log.d("Discovery/Gate", "received PROFILE_READY broadcast");
+                    buildDrawerMenu();
+                }
+            };
+
+    /**
+     * installSplashScreen 必须在 super.onCreate 之前调用（AndroidX SplashScreen 契约）。 keepOnScreenCondition
+     * 只等 splashResolved（首页推荐插画 tab 经 ColdStartSplashHost 回调的本地优先裁决）， 不等网络；安全超时兜底见
+     * SPLASH_SAFETY_TIMEOUT_MS。
+     *
+     * <p>只有这次冷启动真的会落在首页推荐插画 tab（FragmentLeft，位置随 TAB 顺序设置变化）时， 才值得等：用户设置了「启动到最近使用的页」或把默认 tab 指到别处时，
+     * RecmdIllustFeedFragment(插画) 根本不会被创建，splashResolved 永远等不到 Fragment
+     * 那边的信号，只能靠安全超时兜底——那样每次冷启动都白等满 1200ms， 比完全不做这个功能还差。落在其它 tab 时直接放行，不占这些用户便宜。
+     * getNavigationInitPosition() 依赖 initView() 建好的 baseFragments，必须放在 super.onCreate()
+     * 之后读；initView() 提前异常导致 baseFragments 仍为 null 时 同样直接放行，不让一次初始化失败连带把开屏焊死。
+     */
+    @Override
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
+        SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
+        splashScreen.setKeepOnScreenCondition(() -> !splashResolved);
+        super.onCreate(savedInstanceState);
+        if (Shaft.sSettings.isRecommendHotTagsFirst()
+                || baseFragments == null
+                || !(baseFragments[getNavigationInitPosition()] instanceof FragmentLeft)) {
+            homeRefreshSettled = true;
+            markSplashResolved();
+        } else {
+            // 启动页是首页推荐 tab：开屏要等 feed 的「本地优先」快照才放行，而那份快照的读取
+            // （Room + JSON 解析，实测 ~290ms，全在后台）原本要等 Fragment 的 onViewCreated
+            // 才起跑——比首帧还晚，主线程画完首帧后只能空等。这里提前到 Activity.onCreate
+            // 就并行跑起来（见 HomeFeedFirstPagePrefetch）。
+            ceui.pixiv.feeds.cache.HomeFeedFirstPagePrefetch.INSTANCE.warm();
+            new Handler(Looper.getMainLooper())
+                    .postDelayed(this::markSplashResolved, SPLASH_SAFETY_TIMEOUT_MS);
+        }
+    }
+
+    @Override
+    public void markSplashResolved() {
+        splashResolved = true;
+        // 不强制 traversal：开屏照常在下一帧自然退场，列表 layout / 首屏图片解码躲在系统淡出动画
+        // 后面完成。逐帧队列（放行 tab 页 / 建抽屉）等首页站稳后再跑，见 settleThenStartFirstFrameTasks。
+        settleThenStartFirstFrameTasks();
+    }
+
+    @Override
+    public void markColdStartRefreshSettled() {
+        homeRefreshSettled = true;
+        settleThenStartFirstFrameTasks();
+    }
+
+    @Override
+    protected int initLayout() {
+        return R.layout.activity_cover;
+    }
+
+    @Override
+    public boolean hideStatusBar() {
+        return Dev.hideMainActivityStatus;
+    }
+
+    @Override
+    protected void initView() {
+        baseBind.drawerLayout.setScrimColor(Color.TRANSPARENT);
+
+        setUpAutoHidingBottomBar();
+
+        // 抽屉整体 edge-to-edge:顶部补 status bar,底部补 nav bar(BaseActivity 开了 EdgeToEdge)
+        baseBind.drawerContent.setPaddingRelative(
+                baseBind.drawerContent.getPaddingStart(),
+                BarUtils.getStatusBarHeight() + dp(12),
+                baseBind.drawerContent.getPaddingEnd(),
+                BarUtils.getNavBarHeight() + dp(24));
+        // MD3 modal drawer:容器右缘 28dp 圆角(outline 来自 bg_drawer_sheet)
+        baseBind.navView.setClipToOutline(true);
+        // 抽屉菜单整块（实测 226ms）排到首帧之后再建：抽屉是关着的，用户根本看不到，
+        // 没必要挤在首页首帧里。首帧 layout 后排一个动画帧才开闸（见 buildDrawerMenu 的门闩），
+        // 把 initView / referralEnabledLive / onResume / profileReady 四处请求统一收口到这一次。
+        baseBind.getRoot().getViewTreeObserver().addOnGlobalLayoutListener(
+                new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                    @Override
+                    public void onGlobalLayout() {
+                        baseBind.getRoot().getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                        firstFrameReached = true;
+                        startFirstFramePump();
+                    }
+                });
+
+        // 监听画像构建完成，刷新发现入口可见性
+        android.content.IntentFilter profileFilter =
+                new android.content.IntentFilter(
+                        ceui.pixiv.db.discovery.ProfileManager.ACTION_PROFILE_READY);
+        LocalBroadcastManager.getInstance(this)
+                .registerReceiver(profileReadyReceiver, profileFilter);
+
+        // 侧边栏账号区完全由会话驱动：observe 在 onStart 先回放当前账号完成首绑,
+        // 之后登录/切号/编辑资料/前台静默同步的每次写回都会自动重绑,不再需要
+        // 手动 initDrawerHeader() 首绑 + Dev.refreshUser 在 onResume 补刷那一套。
+        SessionManager.INSTANCE.getLoggedInAccount().observe(this, account -> {
+            initDrawerHeader();
+            if (baseBind.navigationRail != null) {
+                baseBind.navigationRail.updateMenuAvatar();
+            }
+        });
+        // 订阅档位是冷启动异步拉回来的,落地时机比账号晚,所以单独观察一次;不然徽章要等
+        // 下一次冷启动才出现,首装的人则永远看不到。
+        RemoteAppConfig remoteAppConfig =
+                ((ServicesProvider) getApplication()).getRemoteAppConfig();
+        remoteAppConfig.getNana7miPlanLive().observe(this, plan -> bindPlanBadge());
+        remoteAppConfig.getReferralEnabledLive().observe(this, enabled -> buildDrawerMenu());
+        // 应用内推送(付费用户公告)也是这次冷启动配置捎回来的,同样异步落地。只弹一次、
+        // 弹过就回执,去重和让路(评分框)都在 InAppPushCenter 里。
+        remoteAppConfig
+                .getInAppPushLive()
+                .observe(this, arrival -> InAppPushCenter.INSTANCE.onConfigArrived(this, arrival));
+        baseBind.drawerHeader.setOnClickListener(v -> openMyUserPage());
+        // 头部右侧的切换图标直达账号管理页,不再经过整块的主页跳转
+        baseBind.drawerSwitchAccount.setOnClickListener(v -> openAccountSwitch());
+        // 侧边栏头像单击进自己主页；长按仍是 R18 临时过滤开关
+        baseBind.userHead.setOnClickListener(v -> openMyUserPage());
+        baseBind.userHead.setOnLongClickListener(
+                new View.OnLongClickListener() {
+                    @Override
+                    public boolean onLongClick(View v) {
+                        boolean filterEnable = Shaft.sSettings.isR18FilterTempEnable();
+                        Shaft.sSettings.setR18FilterTempEnable(!filterEnable);
+                        // 抽屉此刻是开着的，底下的列表不会经过 onResume：显式通知它们按新设置重算显隐
+                        LocalBroadcastManager.getInstance(MainActivity.this)
+                                .sendBroadcast(new Intent(Params.R18_FILTER_CHANGED));
+                        Common.showToast(filterEnable ? "ԅ(♡﹃♡ԅ)" : "X﹏X");
+                        return true;
+                    }
+                });
+        baseBind.navigationView.setOnNavigationItemSelectedListener(
+                item -> selectTabByMenuId(item.getItemId()));
+        baseBind.navigationView.setOnNavigationItemReselectedListener(
+                item -> refreshTabByMenuId(item.getItemId()));
+        baseBind.navigationRail.setOnMenuClickListener(
+                v -> getDrawer().openDrawer(GravityCompat.START, true));
+        baseBind.navigationRail.setDestinationListener(
+                (id, reselected) -> {
+                    if (reselected) {
+                        refreshTabByMenuId(id);
+                    } else {
+                        selectTabByMenuId(id);
+                    }
+                });
+        baseBind.navigationRail.setShortcutListener(this::handleDrawerAction);
+        applyNavigationMode(getResources().getConfiguration());
+        if (baseBind.navigationRail != null) {
+            baseBind.navigationRail.updateMenuAvatar();
+        }
+        baseBind.viewPager.addOnPageChangeListener(
+                new ViewPager.OnPageChangeListener() {
+                    @Override
+                    public void onPageScrolled(
+                            int position, float positionOffset, int positionOffsetPixels) {}
+
+                    @Override
+                    public void onPageSelected(int position) {
+                        if (tabMenuIds != null && position < tabMenuIds.length) {
+                            baseBind.navigationView.setSelectedItemId(tabMenuIds[position]);
+                            baseBind.navigationRail.setSelectedItemId(tabMenuIds[position]);
+                        }
+                        // 换 tab 必须把底栏放回来:收起状态下滑到别的 tab,否则没底栏可点。
+                        bottomBarAutoHide.reveal();
+                        // 即时持久化当前 tab：进程在任意时刻被杀，下次冷启动都能恢复。
+                        persistNavigationPosition(position);
+                    }
+
+                    @Override
+                    public void onPageScrollStateChanged(int state) {}
+                });
+
+        baseBind.viewPager.setTouchEventForwarder(
+                new DrawerLayoutViewPager.IForwardTouchEvent() {
+                    @Override
+                    public void forwardTouchEvent(MotionEvent ev) {
+                        getDrawer().onTouchEvent(ev);
+                    }
+                });
+        DrawerLayoutHelper.setCustomLeftEdgeSize(getDrawer(), 1.0f);
+
+        // 返回键/返回手势:抽屉开着先关抽屉(Android 14+ 跟手滑出,见 DrawerPredictiveBack),
+        // 否则走双击退出。targetSdk 35+ 后预测式返回默认开启,系统不再回调 onKeyDown,
+        // 必须用 OnBackPressedDispatcher 接管。
+        //
+        // 本 Activity 已在 manifest 显式声明 enableOnBackInvokedCallback="true":部分 ROM 不认
+        // AOSP 的默认值,不显式声明时只给 handleOnBackPressed,抽屉那套跟手动画(需要
+        // started/progressed)会静默失效、退化成 DrawerLayout 自带的关闭动画。
+        // 抽屉跟手动画本身可在「设置 · 界面 · 预测性返回」里单独关掉(应用自绘口径)。
+        //
+        // 预测式「回桌面」动画只在 app 没注册任何返回回调时才播,所以第一次按返回 toast 之后
+        // 把这个 callback 关掉 2 秒(refreshMainBackCallback):第二次返回直接交给系统,
+        // 跟手的回桌面预览照常播;2 秒过了再重新接管。抽屉开着时始终接管。
+        // 不带 owner 注册(与 TemplateActivity 同理):垫在所有 Fragment callback 之下。
+        drawerPredictiveBack = new DrawerPredictiveBack(baseBind.drawerLayout, baseBind.navView);
+        mainBackCallback =
+                new OnBackPressedCallback(true) {
+                    @Override
+                    public void handleOnBackStarted(@NonNull BackEventCompat backEvent) {
+                        // 关掉自绘开关时不 start,tracking 保持 false,
+                        // close() 自然落到 DrawerLayout 自带的关闭动画。
+                        if (isDrawerOpen() && Shaft.sSettings.isDrawerPredictiveBackEnabled()) {
+                            // 本进程还没发生过任何导航 → 该 ROM 可能尚未 primed,这一场手势只会拿到
+                            // progress 恒为 0 的 stub,跟手无从驱动。那就允许退化成固定比例的预测
+                            // 返回预览;DrawerPredictiveBack 会先等一小段真实进度,等到了就照常跟手,
+                            // 所以正常设备上判错也看不出来。
+                            boolean unprimedWindow =
+                                    !PredictiveBackSuppressor.hasNavigatedSinceProcessStart();
+                            drawerPredictiveBack.onStarted(unprimedWindow);
+                        }
+                    }
+
+                    @Override
+                    public void handleOnBackProgressed(@NonNull BackEventCompat backEvent) {
+                        if (isDrawerOpen() && Shaft.sSettings.isDrawerPredictiveBackEnabled()) {
+                            drawerPredictiveBack.onProgressed(backEvent.getProgress());
+                        }
+                    }
+
+                    @Override
+                    public void handleOnBackCancelled() {
+                        drawerPredictiveBack.onCancelled();
+                    }
+
+                    @Override
+                    public void handleOnBackPressed() {
+                        if (isDrawerOpen()) {
+                            drawerPredictiveBack.close();
+                        } else {
+                            exit();
+                        }
+                    }
+                };
+        getOnBackPressedDispatcher().addCallback(mainBackCallback);
+        baseBind.drawerLayout.addDrawerListener(
+                new DrawerLayout.SimpleDrawerListener() {
+                    @Override
+                    public void onDrawerOpened(@NonNull View drawerView) {
+                        refreshMainBackCallback();
+                    }
+
+                    @Override
+                    public void onDrawerClosed(@NonNull View drawerView) {
+                        refreshMainBackCallback();
+                    }
+
+                    @Override
+                    public void onDrawerStateChanged(int newState) {
+                        // 冷启动后逐帧队列要等首页刷新收尾才建抽屉菜单；用户抢在那之前拉抽屉，
+                        // 就地补建，别让他看到空抽屉。队列里那次再建会因输入没变被跳过。
+                        if (newState != DrawerLayout.STATE_IDLE && !drawerMenuReady) {
+                            drawerMenuReady = true;
+                            buildDrawerMenu();
+                        }
+                    }
+                });
+    }
+
+    /** 底栏 / 侧栏点了某个 tab：切到它对应的页。 */
+    private boolean selectTabByMenuId(int menuId) {
+        if (tabMenuIds == null) {
+            return false;
+        }
+        for (int i = 0; i < tabMenuIds.length; i++) {
+            if (tabMenuIds[i] == menuId) {
+                baseBind.viewPager.setCurrentItem(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 底栏 / 侧栏重复点当前 tab：刷新该页。 */
+    private void refreshTabByMenuId(int menuId) {
+        if (baseFragments == null) {
+            return;
+        }
+        for (Fragment baseFragment : baseFragments) {
+            if (menuId == R.id.action_1 && baseFragment instanceof FragmentLeft) {
+                ((FragmentLeft) baseFragment).forceRefresh();
+            } else if (menuId == R.id.action_2 && baseFragment instanceof FragmentCenter) {
+                ((FragmentCenter) baseFragment).forceRefresh();
+            } else if (menuId == R.id.action_3 && baseFragment instanceof FragmentRight) {
+                ((FragmentRight) baseFragment).forceRefresh();
+            } else if (menuId == R.id.action_4 && baseFragment instanceof FragmentViewPager) {
+                ((FragmentViewPager) baseFragment).forceRefresh();
+            }
+        }
+    }
+
+    @NonNull
+    @Override
+    public LiveData<Boolean> getNavigationRailShown() {
+        return navigationRailShown;
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applyNavigationMode(newConfig);
+    }
+
+    /**
+     * 按当前窗口宽度在底栏与侧边导航栏之间二选一（#1087）。本 Activity 声明了 screenSize 等
+     * configChanges、不随旋转 / 分屏 / 双栏展开重建，所以在 onConfigurationChanged 里重新判断。
+     * 切换后重发一次 inset：底栏隐藏时内容区不再需要让出底栏高度。
+     */
+    private void applyNavigationMode(@NonNull Configuration configuration) {
+        boolean rail = HomeShellHost.isRailWidth(configuration);
+        if (rail == Boolean.TRUE.equals(navigationRailShown.getValue())) {
+            return;
+        }
+        baseBind.navigationRail.setVisibility(rail ? View.VISIBLE : View.GONE);
+        baseBind.navigationView.setVisibility(rail ? View.GONE : View.VISIBLE);
+        if (!rail && bottomBarAutoHide != null) {
+            // 宽窗口期间底栏可能停在「收起」位置，回到手机排版时放回来
+            bottomBarAutoHide.reveal();
+        }
+        navigationRailShown.setValue(rail);
+        ViewCompat.requestApplyInsets(baseBind.contentHost);
+    }
+
+    private boolean isDrawerOpen() {
+        return baseBind.drawerLayout.isDrawerOpen(GravityCompat.START);
+    }
+
+    /** 抽屉开着 || 不在「再按一次退出」的 2 秒窗口内 → 接管返回;否则交给系统播预测式回桌面。 */
+    private void refreshMainBackCallback() {
+        if (mainBackCallback == null) return;
+        boolean exitArmed = System.currentTimeMillis() - mExitTime <= EXIT_WINDOW_MS;
+        mainBackCallback.setEnabled(isDrawerOpen() || !exitArmed);
+    }
+
+    /**
+     * 底栏跟随列表滚动收起 / 上滑恢复。
+     *
+     * <p>布局上底栏已经浮在 view_pager 之上(见 activity_cover.xml),所以内容页现在铺满整屏——
+     * 被底栏压住的那一截靠这里补:把底栏高度(它自己已经吃掉了系统导航栏 inset)当作底部安全区 重新分发给内容区,各列表沿用既有的「底部 systemBars inset ->
+     * paddingBottom」那套读法 (FeedFragment.applyBottomSafeInset / 发现页与「我」页的 NestedScrollView),不用各自去认
+     * 「宿主有没有底栏」。首帧底栏还没量到高度,量到后由 layout 监听补发一次 inset。 inset 的 listener 挂在 content_host 这层壳上而不是
+     * view_pager 上,原因见 activity_cover.xml。
+     *
+     * <p>收起 / 恢复的触发见 {@link BottomBarAutoHide}(不能靠 CoordinatorLayout 的嵌套滚动分发)。
+     */
+    private void setUpAutoHidingBottomBar() {
+        // Android 10 及以下会把内容区改写的 inset 继续传给同级底栏，导致底栏把自身高度
+        // 再加进 padding，布局后重新分发又继续增高，最终遮满首页。让修改只影响子树；
+        // 装在 DrawerLayout 根上，确保侧栏也能收到原始系统 inset。
+        ViewGroupCompat.installCompatInsetsDispatch(baseBind.drawerLayout);
+        ViewCompat.setOnApplyWindowInsetsListener(
+                baseBind.contentHost,
+                (v, windowInsets) -> {
+                    Insets navBars =
+                            windowInsets.getInsets(WindowInsetsCompat.Type.navigationBars());
+                    int barHeight =
+                            baseBind.navigationView.getVisibility() == View.VISIBLE
+                                    ? baseBind.navigationView.getHeight()
+                                    : 0;
+                    int bottom = Math.max(navBars.bottom, barHeight);
+                    return new WindowInsetsCompat.Builder(windowInsets)
+                            .setInsets(
+                                    WindowInsetsCompat.Type.navigationBars(),
+                                    Insets.of(navBars.left, navBars.top, navBars.right, bottom))
+                            .build();
+                });
+        baseBind.navigationView.addOnLayoutChangeListener(
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    if ((bottom - top) != (oldBottom - oldTop)) {
+                        ViewCompat.requestApplyInsets(baseBind.contentHost);
+                    }
+                });
+
+        bottomBarAutoHide = new BottomBarAutoHide(baseBind.navigationView);
+        bottomBarAutoHide.install(this);
+        // 「底栏跟随滚动收起」关掉时直接把 behavior 摘掉（固定常显）。设置页改完回首页
+        // onResume 会再同步一次，所以不用重启。
+        bottomBarAutoHide.setEnabled(Shaft.sSettings.isBottomBarHideOnScroll());
+    }
+
+    @SuppressLint("RestrictedApi")
+    private void initFragment() {
+        // 底部 TAB:前三个内容页(推荐/发现/动态)按设置的顺序排列,R18 与「我」固定在末尾。
+        // 六种顺序对应设置页 string_343~348 的排列;menu xml 无法换序,菜单按最终顺序
+        // 程序化构建(#969:换序的消费端在「主页显示R18」改造时丢失,此后设置一直不生效)
+        final int[][] TAB_ORDERS = {
+            {0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}
+        };
+        final int[] TAB_MENU_IDS = {R.id.action_1, R.id.action_2, R.id.action_3};
+        final int[] TAB_TITLES = {R.string.recommend, R.string.discover, R.string.whats_new};
+        final int[] TAB_ICONS = {
+            R.drawable.ic_tuijian, R.drawable.ic_discover, R.drawable.ic_dongtai
+        };
+        final Fragment[] contentPages = {
+            new FragmentLeft(), new FragmentCenter(), new FragmentRight()
+        };
+
+        final int orderIndex = Shaft.sSettings.getBottomBarOrder();
+        final int[] order =
+                TAB_ORDERS[orderIndex >= 0 && orderIndex < TAB_ORDERS.length ? orderIndex : 0];
+
+        boolean showR18Tab = Shaft.sSettings.isMainViewR18();
+        boolean showMeTab = Dev.showMeTab;
+        int count = order.length + (showR18Tab ? 1 : 0) + (showMeTab ? 1 : 0);
+        baseFragments = new Fragment[count];
+        tabMenuIds = new int[count];
+        Menu menu = baseBind.navigationView.getMenu();
+        // 底栏 menu 是 MenuBuilder(NavigationBarMenu)：每 add 一项都会让
+        // NavigationBarMenuView.updateMenuView() 判定 isMenuStructureSame() 为 false →
+        // buildMenuView() 全量重建，逐项 add 就重建 1+2+3+4=10 个 NavigationBarItemView，
+        // 实际只需要 4 个（冷启动实测这一段 ~200ms）。material 自己的 inflateMenu()
+        // 就是用 presenter.setUpdateSuspended 把整段包起来、末尾只重建一次，这里照做。
+        //
+        // 抑制的层要对：MenuBuilder.stopDispatchingItemsChanged() 那一层没用——
+        // NavigationBarMenu.addInternal 每次 add 内部自带走一对 stop/start，会把外层抑制冲掉。
+        // presenter 的 updateSuspended 更靠上、addInternal 碰不到，才有效。
+        final com.google.android.material.navigation.NavigationBarPresenter navPresenter =
+                baseBind.navigationView.getPresenter();
+        navPresenter.setUpdateSuspended(true);
+        int position = 0;
+        try {
+            for (int tab : order) {
+                baseFragments[position] = contentPages[tab];
+                tabMenuIds[position] = TAB_MENU_IDS[tab];
+                menu.add(Menu.NONE, TAB_MENU_IDS[tab], Menu.NONE, TAB_TITLES[tab])
+                        .setIcon(TAB_ICONS[tab]);
+                baseBind.navigationRail.addDestination(
+                        TAB_MENU_IDS[tab], TAB_TITLES[tab], TAB_ICONS[tab]);
+                position++;
+            }
+            if (showR18Tab) {
+                baseFragments[position] = FragmentViewPager.newInstance(Params.VIEW_PAGER_R18);
+                tabMenuIds[position] = R.id.action_4;
+                menu.add(Menu.NONE, R.id.action_4, Menu.NONE, R.string.string_r)
+                        .setIcon(R.drawable.ic_xiongbu);
+                baseBind.navigationRail.addDestination(
+                        R.id.action_4, R.string.string_r, R.drawable.ic_xiongbu);
+                position++;
+            }
+            if (showMeTab) {
+                baseFragments[position] = new MeFragment();
+                tabMenuIds[position] = R.id.action_5;
+                menu.add(Menu.NONE, R.id.action_5, Menu.NONE, R.string.me_tab)
+                        .setIcon(R.drawable.ic_me);
+                baseBind.navigationRail.addDestination(
+                        R.id.action_5, R.string.me_tab, R.drawable.ic_me);
+            }
+        } finally {
+            navPresenter.setUpdateSuspended(false);
+        }
+        navPresenter.updateMenuView(true);
+        // 侧栏分割线下的快捷入口（原型的「收藏 / 下载」），与侧边菜单同一套分发
+        baseBind.navigationRail.addShortcut(
+                R.id.illust_star,
+                R.string.rail_bookmarks,
+                DrawerIconCatalog.iconFor(R.id.illust_star));
+        baseBind.navigationRail.addShortcut(
+                nav_gallery, R.string.rail_downloads, DrawerIconCatalog.iconFor(nav_gallery));
+        final ceui.lisa.adapters.LazyFragmentPagerAdapter lazyAdapter =
+                new ceui.lisa.adapters.LazyFragmentPagerAdapter(getSupportFragmentManager()) {
+                    @Override
+                    public Fragment getItem(int i) {
+                        return baseFragments[i];
+                    }
+
+                    @Override
+                    public int getCount() {
+                        return baseFragments.length;
+                    }
+                };
+        baseBind.viewPager.setAdapter(lazyAdapter);
+        baseBind.viewPager.setOffscreenPageLimit(baseFragments.length - 1);
+        final int navigationInitPosition = getNavigationInitPosition();
+        // 去重水位必须来自真实落盘值，不能直接假定本次启动页已经保存。否则用户从固定
+        // 启动页切到「上次位置」且期间没再换 TAB 时，MMKV 仍会保留更早的旧位置。
+        lastPersistedNavigationPosition =
+                Shaft.getMMKV().getInt(Params.MAIN_ACTIVITY_NAVIGATION_POSITION, -1);
+        persistNavigationPosition(navigationInitPosition);
+        baseBind.viewPager.setCurrentItem(navigationInitPosition);
+        // 落在第 0 页时 setCurrentItem 不回调 onPageSelected，侧栏选中态要自己补上
+        baseBind.navigationRail.setSelectedItemId(tabMenuIds[navigationInitPosition]);
+        Manager.get().restore();
+
+        // Show rate dialog after a short delay to avoid disrupting app startup.
+        // 浏览记录云同步同意框不在首页弹,改到用户点进浏览历史页时再问(见 FragmentHistoryTabs / issue #889)。
+        baseBind.viewPager.postDelayed(
+                () -> {
+                    // 应用内推送正在展示就这次不弹评分框(showIfNeeded 没跑到就不消耗那一次机会),
+                    // 两个框叠在一起谁都看不清。
+                    if (InAppPushCenter.INSTANCE.isShowing()) return;
+                    ceui.pixiv.widgets.RateAppDialog.Companion.showIfNeeded(
+                            getSupportFragmentManager());
+                },
+                2000);
+        // 首帧只建当前 tab：其余页停在 CREATED（见 LazyFragmentPagerAdapter），
+        // 连同抽屉菜单一起排进「每帧一件事」的队列，首帧之后逐个补上。
+        // 首页推荐插到最前：从别的启动页最常切回的就是它，而且它很轻（~10ms），先建还能替
+        // 发现页摊掉首次 inflate 的冷开销（字体、类初始化）。
+        for (int i = 0; i < baseFragments.length; i++) {
+            enqueueFirstFrameTask(() -> { lazyAdapter.releaseOneDeferredPage(FragmentLeft.class); });
+        }
+        enqueueFirstFrameTask(() -> {
+            drawerMenuReady = true;
+            buildDrawerMenu();
+        });
+    }
+
+    @Override
+    protected void initData() {
+        if (SessionManager.INSTANCE.isLoggedIn()) {
+            if (Common.isAndroidQ()
+                    || ContextCompat.checkSelfPermission(
+                                    this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            == PackageManager.PERMISSION_GRANTED) {
+                // Android 10+ 无需 WRITE_EXTERNAL_STORAGE；pre-Q 已授权也直接进。
+                initFragment();
+            } else {
+                ActivityCompat.requestPermissions(
+                        this,
+                        new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        REQUEST_CODE_STORAGE_PERMISSION);
+            }
+        } else {
+            // 用 CLEAR_TASK 让登录页直接成为 task root，不走「startActivity + finish()」蹦床；
+            // 与 Common.logOut 的写法保持一致。
+            Intent intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.LOGIN.key);
+            intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            startActivity(intent);
+        }
+    }
+
+    private static final int REQUEST_CODE_STORAGE_PERMISSION = 1001;
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CODE_STORAGE_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                initFragment();
+            } else {
+                Common.showToast(getString(R.string.access_denied));
+                finish();
+            }
+        }
+    }
+
+    /** 侧边栏一条入口:分发 id + 标题 + 可见性门控。图标由动作目录统一提供。 */
+    private static class DrawerEntry {
+        final int id;
+        final int titleRes;
+        final boolean visible;
+
+        /** 行右侧小胶囊角标文案(如「NEW」);null = 不显示。 */
+        final String badge;
+
+        DrawerEntry(int id, int titleRes, boolean visible, String badge) {
+            this.id = id;
+            this.titleRes = titleRes;
+            this.visible = visible;
+            this.badge = badge;
+        }
+
+        DrawerEntry(int id, int titleRes, boolean visible) {
+            this(id, titleRes, visible, null);
+        }
+
+        DrawerEntry(int id, int titleRes) {
+            this(id, titleRes, true);
+        }
+    }
+
+    /** 把一件「首帧之后逐帧做」的活排进队列（见 firstFrameTasks）。 */
+    private void enqueueFirstFrameTask(Runnable task) {
+        firstFrameTasks.add(task);
+        startFirstFramePump();
+    }
+
+    /**
+     * 启动首帧后的逐帧队列（幂等）。
+     *
+     * <p>必须同时满足「首帧已画」和「开屏已放行」才启动。队列里的活（放行 tab 页、建抽屉）
+     * 都是 Choreographer 帧，优先级高于首页 feed 那条「缓存命中 → 提交 uiState」的普通消息
+     * 回调——实测把它们排在开屏放行之前，会把 splash 整个顶后约 580ms，首帧省下的时间原样吐回去。
+     * 放行之后还要等首页站稳（{@link #postSplashSettled}），否则会挤掉开屏淡出期间的列表 layout 与出图。
+     */
+    private void startFirstFramePump() {
+        if (!firstFrameReached || !splashResolved || !postSplashSettled || firstFramePumpRunning) {
+            return;
+        }
+        firstFramePumpRunning = true;
+        pumpFirstFrameTasks();
+    }
+
+    /**
+     * 开屏放行且首页刷新收尾（{@link #homeRefreshSettled}）之后，等「下一帧画出来 +
+     * {@link #POST_SPLASH_SETTLE_MS} + 主线程空闲」再开逐帧队列。
+     *
+     * <p>为什么不能放行后立刻（或推迟一帧）就跑：放行那一刻 feed 只是提交了缓存条目，列表还没 layout、
+     * 图片还没解码；系统开屏淡出期间主线程一被队列占住，淡出结束露出来的就是空白页和灰卡片
+     * （带 patch-10-11-1 冷启动实测：淡出后先空白 ~6 帧，再灰卡片 ~3 帧才出图）。
+     * 放行（含安全超时）与刷新收尾都可能被调用多次，只布置一次。
+     */
+    private void settleThenStartFirstFrameTasks() {
+        if (!splashResolved || !homeRefreshSettled || postSplashSettleArmed) {
+            return;
+        }
+        postSplashSettleArmed = true;
+        final View root = baseBind == null ? null : baseBind.getRoot();
+        if (root == null) {
+            postSplashSettled = true;
+            startFirstFramePump();
+            return;
+        }
+        root.getViewTreeObserver().addOnDrawListener(new ViewTreeObserver.OnDrawListener() {
+            private boolean fired = false;
+
+            @Override
+            public void onDraw() {
+                if (fired) {
+                    return;
+                }
+                fired = true;
+                final ViewTreeObserver.OnDrawListener self = this;
+                // onDraw 回调里不允许摘监听，挪到下一条消息
+                root.post(() -> root.getViewTreeObserver().removeOnDrawListener(self));
+                root.postDelayed(() -> Looper.myQueue().addIdleHandler(() -> {
+                    postSplashSettled = true;
+                    startFirstFramePump();
+                    return false;
+                }), POST_SPLASH_SETTLE_MS);
+            }
+        });
+        // 刷新收尾那一刻界面可能已经静止（停在快照上 / 失败态没有动画），不保证还有下一帧——
+        // 补一次重绘，别让队列干等。开屏此时已放行，这一帧不会把开屏提前顶走。
+        root.invalidate();
+    }
+
+    /**
+     * 每帧从队列取一件事跑，跑完排下一帧；队列空了就停。
+     *
+     * <p>不在 postOnAnimation 回调里直接跑，而是等这一帧画完、主线程空闲再跑：回调属于本帧的
+     * ANIMATION 阶段，放行页的 inflate 会和它紧跟着的首次 measure/layout 叠进同一帧（启动页为
+     * 动态页时实测这一帧 52~86ms）。挪到空闲之后两者分落两条消息，任务也排到 feed 提交数据
+     * 这类普通消息后面。
+     */
+    private void pumpFirstFrameTasks() {
+        baseBind.getRoot().postOnAnimation(() -> Looper.myQueue().addIdleHandler(() -> {
+            if (isFinishing() || isDestroyed()) {
+                firstFrameTasks.clear();
+                firstFramePumpRunning = false;
+                return false;
+            }
+            Runnable task = firstFrameTasks.poll();
+            if (task == null) {
+                firstFramePumpRunning = false;
+                return false;
+            }
+            task.run();
+            pumpFirstFrameTasks();
+            return false;
+        }));
+    }
+
+    /**
+     * 重建侧边栏分组(MD3-E 分段样式,同设置页)。所有入口的可见性门控收口在这里: - 发现:画像完备(PROFILE_READY 广播 / onResume 时重建) -
+     * 试验性分区:github 渠道 release 保留(标签热度导出仅 debug);google play 渠道为合规起见整段隐藏。
+     * - 当前最热 / 站长推荐 / 操作记录 / 通知中心:服务端或官方 API 依赖,google flavor 不展示。
+     * 行按可见项重新生成,分段圆角(top/mid/bottom/single)永远贴合,不存在隐藏行破角问题。
+     */
+    private void buildDrawerMenu() {
+        // 首帧之后才真正建（见 drawerMenuReady）：抽屉是关着的，用户看不到，
+        // 没必要占冷启动首帧——实测这一段 226ms，是首帧之外最大的一块。
+        if (!drawerMenuReady) {
+            return;
+        }
+        boolean isDebugBuild = ceui.lisa.BuildConfig.DEBUG;
+        boolean isLite = ceui.lisa.BuildConfig.IS_LITE;
+        boolean experimentalAllowed = !(isLite && !isDebugBuild);
+
+        ceui.pixiv.db.discovery.UserProfile profile =
+                ((ServicesProvider) getApplication()).getProfileManager().cached();
+        boolean discoveryReady = profile != null && profile.isReady();
+        boolean referralEnabled =
+                ceui.pixiv.services.ServiceProviderKt.appServices(this)
+                        .getRemoteAppConfig()
+                        .getReferralEnabled();
+        // 其余门控（flavor / buildType）和行内容（文案、图标）在 Activity 生命周期内都不变，
+        // 语言、主题变化会重建 Activity 连同这个字段一起复位。
+        String inputs = discoveryReady + "|" + referralEnabled;
+        if (inputs.equals(drawerMenuInputs)) {
+            return;
+        }
+        drawerMenuInputs = inputs;
+        android.util.Log.d("Discovery/Gate", "buildDrawerMenu, discoveryReady=" + discoveryReady);
+
+        LinearLayout sections = baseBind.drawerSections;
+        sections.removeAllViews();
+
+        // 「浏览与发现」独立小组已撤:发现内容(最新/热度标签/特辑/本月收藏/当前最热)已铺进
+        // 「发现」tab 的内容货架,「置顶标签」是用户自己钉的标签、并入「我的」;「发现」(算法流)
+        // 只作深链兜底、gate 后极少可见,挪进「试验性」分区。点击 handler 全部保留。
+        // 「个人主页」入口去掉——顶部账号整块点击即进自己主页,不再重复一行。
+        // 「投稿」(pixiv upload.php 网页链接)已整体移除。
+        addDrawerSection(
+                sections,
+                R.string.drawer_section_mine,
+                new DrawerEntry[] {
+                    new DrawerEntry(R.id.illust_star, R.string.string_319),
+                    new DrawerEntry(R.id.novel_star, R.string.string_320),
+                    new DrawerEntry(R.id.watch_later, R.string.watch_later),
+                    new DrawerEntry(R.id.nav_pinned_tags, R.string.pinned_content),
+                    // 精华列:各处「收藏到精华」写进 feature_table 的本地列表快照。c3f08172 侧栏
+                    // 「发现」分组瘦身时被连带删掉,但它不属于搬进「发现」tab 的那批(最新/热度标签/
+                    // 特辑/本月收藏/当前最热),页面和 handler 一直都在——只是没入口,存了看不了。
+                    new DrawerEntry(R.id.nav_feature, R.string.string_248),
+                    new DrawerEntry(R.id.watchlist, R.string.watchlist),
+                    new DrawerEntry(R.id.novel_markers, R.string.core_string_novel_marker),
+                    new DrawerEntry(R.id.follow_user, R.string.string_321),
+                    new DrawerEntry(R.id.nav_fans, R.string.string_322),
+                });
+
+        // 「搜索按热度排序」分组:用量查询与领取体验卡的推介计划放在一起。
+        // 紧贴「我的」之后、「记录与管理」之前。渠道口径跟着借号功能本身走
+        // (google flavor 整个借号搜索都不出现),所以是 !isLite 而不是 experimentalAllowed:
+        // 后者在 Lite debug 下仍会放行,会给一个功能不存在的包留下查不到东西的入口。
+        if (!isLite) {
+            addDrawerSection(
+                    sections,
+                    R.string.drawer_section_usage,
+                    new DrawerEntry[] {
+                        new DrawerEntry(
+                                R.id.nav_nana7mi_usage, R.string.nana7mi_usage_title, true, "NEW"),
+                        // 开关来自 /v1/config;活动入口关闭时隐藏此行。
+                        new DrawerEntry(
+                                R.id.nav_referral_plan,
+                                R.string.referral_entry,
+                                referralEnabled,
+                                "NEW"),
+                    });
+        }
+
+        // 高频入口前置:浏览历史 排在「记录与管理」首位,设置 排在「其他」首位。
+        addDrawerSection(
+                sections,
+                R.string.drawer_section_records,
+                new DrawerEntry[] {
+                    new DrawerEntry(nav_slideshow, R.string.view_history),
+                    new DrawerEntry(nav_gallery, R.string.download_manager),
+                    new DrawerEntry(R.id.nav_snapshot, R.string.snapshot_manager_title),
+                    new DrawerEntry(
+                            R.id.nav_notifications,
+                            R.string.notifications_and_info,
+                            experimentalAllowed),
+                    new DrawerEntry(R.id.muted_list, R.string.muted_history),
+                    new DrawerEntry(R.id.nav_event_history, R.string.event_history, !isLite),
+                });
+
+        addDrawerSection(
+                sections,
+                R.string.the_others,
+                new DrawerEntry[] {
+                    new DrawerEntry(R.id.nav_manage, R.string.app_settings),
+                    new DrawerEntry(R.id.nav_ai_upscale, R.string.string_ai_upscale_standalone),
+                    new DrawerEntry(R.id.nav_reverse, R.string.search_image_origin),
+                    new DrawerEntry(R.id.nav_share, R.string.about_app),
+                });
+
+        addDrawerSection(
+                sections,
+                R.string.experimental_section,
+                new DrawerEntry[] {
+                    new DrawerEntry(
+                            R.id.nav_discovery,
+                            R.string.string_discovery,
+                            experimentalAllowed && discoveryReady),
+                    new DrawerEntry(
+                            R.id.nav_local_novel, R.string.local_novel_entry, experimentalAllowed),
+                    new DrawerEntry(
+                            R.id.nav_network_test,
+                            R.string.nav_network_test_entry,
+                            experimentalAllowed),
+                });
+    }
+
+    /** 生成一个分组(MD3 drawer section):分割线 + 小节标题 + 透明底胶囊行。 全组不可见则整组(含分割线/标题)不出现。 */
+    private void addDrawerSection(LinearLayout parent, int titleRes, DrawerEntry[] entries) {
+        java.util.List<DrawerEntry> visible = new java.util.ArrayList<>();
+        for (DrawerEntry entry : entries) {
+            if (entry.visible) {
+                visible.add(entry);
+            }
+        }
+        if (visible.isEmpty()) {
+            return;
+        }
+        LayoutInflater inflater = LayoutInflater.from(this);
+        if (parent.getChildCount() > 0) {
+            parent.addView(inflater.inflate(R.layout.item_drawer_divider, parent, false));
+        }
+        TextView header = (TextView) inflater.inflate(R.layout.item_drawer_section, parent, false);
+        header.setText(titleRes);
+        parent.addView(header);
+        for (DrawerEntry entry : visible) {
+            View row = inflater.inflate(R.layout.item_drawer_row, parent, false);
+            ((ImageView) row.findViewById(R.id.drawer_row_icon))
+                    .setImageResource(DrawerIconCatalog.iconFor(entry.id));
+            ((TextView) row.findViewById(R.id.drawer_row_title)).setText(entry.titleRes);
+            TextView badge = row.findViewById(R.id.drawer_row_badge);
+            if (entry.badge != null) {
+                badge.setText(entry.badge);
+                badge.setVisibility(View.VISIBLE);
+            }
+            row.setOnClickListener(
+                    v -> {
+                        // [实验] 武装点放在这里而不是 handleDrawerAction 里:那个方法还与
+                        // MeFragment / FragmentCenter 共用,只有这里是真正的"从侧边栏进入"。
+                        PredictiveBackSuppressor.armDrawerLaunch();
+                        leaveDrawerThen(() -> handleDrawerAction(entry.id));
+                    });
+            parent.addView(row);
+        }
+    }
+
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density);
+    }
+
+    public DrawerLayout getDrawer() {
+        return baseBind.drawerLayout;
+    }
+
+    /**
+     * 侧边栏 / MeFragment / FragmentCenter 共用的入口分发,跟 menu/activity_main_drawer.xml 的 id 对齐; 调用方直接传
+     * R.id.xxx 走这里,避免多处维护同样的跳转。
+     */
+    @SuppressLint("NonConstantResourceId")
+    public void handleDrawerAction(int id) {
+        Intent intent = null;
+        if (id == nav_gallery) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.DOWNLOAD_MANAGER.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.nav_snapshot) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.SNAPSHOT_MANAGER.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == nav_slideshow) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.HISTORY.key);
+        } else if (id == R.id.watch_later) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WATCH_LATER.key);
+        } else if (id == R.id.nav_notifications) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.NOTIFICATION_CENTER.key);
+        } else if (id == R.id.nav_manage) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.SETTINGS.key);
+        } else if (id == R.id.nav_referral_plan) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.REFERRAL_PLAN.key);
+        } else if (id == R.id.nav_nana7mi_usage) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.NANA7MI_USAGE.key);
+        } else if (id == R.id.nav_prime_tags) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.PRIME_TAGS.key);
+        } else if (id == R.id.nav_pinned_tags) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.PINNED_CONTENT.key);
+        } else if (id == R.id.nav_discovery) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.DISCOVERY.key);
+        } else if (id == R.id.nav_share) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.ABOUT.key);
+        } else if (id == R.id.main_page) {
+            intent = new Intent(mContext, UActivity.class);
+            intent.putExtra(Params.USER_ID, SessionManager.INSTANCE.getLoggedInUid());
+        } else if (id == R.id.nav_ai_upscale) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.AI_UPSCALE.key);
+        } else if (id == R.id.nav_reverse) {
+            selectPhoto();
+        } else if (id == R.id.nav_new_work) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.NEW_WORKS.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.muted_list) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.MUTED_TAGS.key);
+        } else if (id == R.id.nav_feature) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.FEATURE_LIST.key);
+        } else if (id == R.id.nav_fans) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.FANS.key);
+        } else if (id == R.id.illust_star) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(
+                    TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.MY_ILLUST_COLLECTION.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.novel_star) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.MY_NOVEL_COLLECTION.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.watchlist) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WATCHLIST.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.novel_markers) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.NOVEL_MARKERS.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.follow_user) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.MY_FOLLOWING.key);
+            intent.putExtra("hideStatusBar", false);
+        } else if (id == R.id.nav_current_hot) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.RECENT_RECOMMEND.key);
+        } else if (id == R.id.nav_site_recommend) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.SITE_RECOMMEND.key);
+        } else if (id == R.id.nav_event_history) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.EVENT_HISTORY.key);
+        } else if (id == R.id.nav_local_novel) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.LOCAL_NOVEL_LIBRARY.key);
+        } else if (id == R.id.nav_network_test) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.DEBUG_NETWORK_TEST.key);
+        } else if (id == R.id.nav_web_home) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WEB_HOME.key);
+        } else if (id == R.id.nav_fanbox) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            if (ceui.pixiv.ui.fanbox.FanboxHomeFeedKt.hasFanboxSession()) {
+                // 有 FANBOXSESSID 才进原生首页 —— post.listHome 未登录一律 401,
+                // 直接进去只会看到一屏错误态。
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.FANBOX_HOME.key);
+            } else {
+                // 没登录过:送去网页版登录。cookie 存在 WebView 的 CookieManager 里,
+                // 登完下次点进来 hasFanboxSession() 就为真,自动走原生。
+                // 走「网页链接」这条现成路由(FragmentWebView,带标准 toolbar),
+                // 不是 WebFragment —— 后者是个没有 toolbar 的裸 WebView,外观对不上。
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WEB_LINK.key);
+                intent.putExtra(Params.URL, "https://www.fanbox.cc/");
+                intent.putExtra(Params.TITLE, getString(R.string.fanbox_entry));
+                intent.putExtra(Params.PREFER_PRESERVE, true);
+            }
+        } else if (id == R.id.nav_chat_room) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.CHAT.key);
+        } else if (id == R.id.nav_plaza) {
+            intent = new Intent(mContext, TemplateActivity.class);
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.PLAZA.key);
+        }
+        if (intent != null) {
+            // 当前最热 / 本月收藏 / 操作记录:服务端聚合内容可能含 R-18,进去前过一次警示框
+            // (「坚持查看」点一次后全局不再弹)。其它入口照常直接进。
+            if (id == R.id.nav_current_hot
+                    || id == R.id.nav_site_recommend
+                    || id == R.id.nav_event_history) {
+                final Intent gated = intent;
+                ceui.pixiv.ui.recommend.SensitiveContentGate.gateOrProceed(
+                        this, () -> startActivity(gated));
+            } else {
+                startActivity(intent);
+            }
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.clear();
+    }
+
+    private void selectPhoto() {
+        new WitDialog.CheckableDialogBuilder(mActivity)
+                .addItems(
+                        ALL_SELECT_WAY,
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                dialog.dismiss();
+                                try {
+                                    Intent intent;
+                                    if (which == 0) {
+                                        // AndroidX 优先用系统照片选择器，不支持时自动回退到文档选择器。
+                                        intent =
+                                                new PickVisualMedia()
+                                                        .createIntent(
+                                                                MainActivity.this,
+                                                                new PickVisualMediaRequest.Builder()
+                                                                        .setMediaType(
+                                                                                PickVisualMedia
+                                                                                        .ImageOnly
+                                                                                        .INSTANCE)
+                                                                        .build());
+                                    } else {
+                                        intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                                        intent.setType("image/*");
+                                    }
+                                    startActivityForResult(intent, Params.REQUEST_CODE_CHOOSE);
+                                } catch (ActivityNotFoundException | SecurityException e) {
+                                    Common.showToast(R.string.string_262);
+                                }
+                            }
+                        })
+                .show();
+    }
+
+    private void openMyUserPage() {
+        Intent userIntent = new Intent(mContext, UActivity.class);
+        userIntent.putExtra(Params.USER_ID, (long) SessionManager.INSTANCE.getLoggedInUid());
+        leaveDrawerThen(() -> startActivity(userIntent));
+    }
+
+    private void openAccountSwitch() {
+        Intent intent = new Intent(mContext, TemplateActivity.class);
+        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.ACCOUNT_SWITCH.key);
+        leaveDrawerThen(() -> startActivity(intent));
+    }
+
+    /**
+     * 侧边栏条目点击后的统一出场节奏:先让 ripple 播完,再收抽屉,最后才跳转。
+     *
+     * <p>抽屉关闭 250ms、ripple 的扩散动画 225ms,两者同时起跑时,波纹最明显的那一刻
+     * 正好是抽屉滑出屏幕的那一刻 —— 看起来就是"抽屉都快收完了才出现波纹"。先等 120ms
+     * (此时 ripple 已扩散到六成、肉眼明确可见)再收抽屉,波纹才有了自己的时间。
+     *
+     * <p>跳转排在 closeDrawer 之后:startActivity 是同步调用,实测会占住主线程约 90ms,
+     * 排在前面时抽屉的 translationX 已经推进了一段却没有一帧被画出来,ripple 的起始帧
+     * 也一起被吞掉。
+     */
+    private void leaveDrawerThen(Runnable action) {
+        // 这 120ms 里抽屉还静止张开、每一行都照常可点(原来点完抽屉立刻进入 settling,
+        // 再点会被 ViewDragHelper 当成抓抽屉拦掉);不挡的话连点两下就会叠开两个页面。
+        if (pendingDrawerLeave != null) {
+            return;
+        }
+        pendingDrawerLeave =
+                () -> {
+                    pendingDrawerLeave = null;
+                    baseBind.drawerLayout.closeDrawer(GravityCompat.START);
+                    action.run();
+                };
+        baseBind.drawerLayout.postDelayed(pendingDrawerLeave, 120);
+    }
+
+    private void initDrawerHeader() {
+        if (SessionManager.INSTANCE.isLoggedIn()
+                && SessionManager.INSTANCE.getLoggedInUser() != null) {
+            Glide.with(mContext)
+                    .load(GlideUtil.getHead(SessionManager.INSTANCE.getLoggedInUser()))
+                    .into(baseBind.userHead);
+            baseBind.userName.setText(SessionManager.INSTANCE.getLoggedInUser().getName());
+            String mailAddress = SessionManager.INSTANCE.getMailAddress();
+            baseBind.userEmail.setText(
+                    TextUtils.isEmpty(mailAddress)
+                            ? mContext.getString(R.string.no_mail_address)
+                            : mailAddress);
+        }
+        bindPlanBadge();
+    }
+
+    /**
+     * 侧边栏的订阅徽章。免费用户什么都不显示 —— 没订阅的人这一栏应该和加这个功能之前 一模一样，不该多出一块空白或者一个「免费」标签。
+     *
+     * <p>读的是冷启动缓存的档位（{@link RemoteAppConfig}），所以抽屉第一次拉开就有答案， 不等网络。刚买完的人要么等下次冷启动、要么进一趟用量页 ——
+     * 那页会拿额度接口返回的 最新档位回写缓存，回来抽屉就更新了。
+     *
+     * <p>认的是「他买了什么」而不是「按什么计量」：试运营期间服务端把所有人抬到 Max， 拿计量档位去显示会给每个没付钱的人发一颗 MAX 徽章。
+     */
+    private void bindPlanBadge() {
+        if (ceui.lisa.BuildConfig.IS_LITE) {
+            baseBind.userPlanBadge.setVisibility(View.GONE);
+            return;
+        }
+        Nana7miPlan plan =
+                ((ServicesProvider) getApplication()).getRemoteAppConfig().getNana7miPlan();
+        String label = plan == null ? null : plan.getBadgeLabel();
+        if (label == null) {
+            baseBind.userPlanBadge.setVisibility(View.GONE);
+        } else {
+            baseBind.userPlanBadge.setText(label);
+            baseBind.userPlanBadge.setVisibility(View.VISIBLE);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == Params.REQUEST_CODE_CHOOSE && resultCode == RESULT_OK) {
+            // 部分回移版照片选择器只通过 ClipData 返回 Uri，交给同一契约解析。
+            Uri imageUri = new PickVisualMedia().parseResult(resultCode, data);
+            if (imageUri != null) {
+                ReverseImage.searchFrom(this, imageUri, ReverseImage.DEFAULT_ENGINE, null);
+            }
+        }
+    }
+
+    public void exit() {
+        if ((System.currentTimeMillis() - mExitTime) > 2000) {
+            if (Manager.get().getContent().size() != 0) {
+                new WitDialog.MessageDialogBuilder(mContext)
+                        .setTitle(getString(R.string.shaft_hint))
+                        .setMessage(mContext.getString(R.string.you_have_download_plan))
+                        .addAction(R.string.cancel, (d, i) -> d.dismiss())
+                        .addAction(
+                                0,
+                                R.string.see_download_task,
+                                WitDialogAction.ACTION_PROP_NEUTRAL,
+                                (d, i) -> {
+                                    Intent intent = new Intent(mContext, TemplateActivity.class);
+                                    intent.putExtra(
+                                            TemplateActivity.EXTRA_FRAGMENT,
+                                            TemplateRoute.DOWNLOAD_MANAGER.key);
+                                    intent.putExtra("hideStatusBar", true);
+                                    startActivity(intent);
+                                    d.dismiss();
+                                })
+                        .addAction(
+                                0,
+                                R.string.sure,
+                                WitDialogAction.ACTION_PROP_NEGATIVE,
+                                (d, i) -> {
+                                    Manager.get().stopAll();
+                                    finish();
+                                })
+                        .show();
+            } else {
+                Common.showToast(getString(R.string.double_click_finish));
+                mExitTime = System.currentTimeMillis();
+                refreshMainBackCallback();
+                baseBind.getRoot().postDelayed(this::refreshMainBackCallback, EXIT_WINDOW_MS + 100);
+            }
+        } else {
+            // 2 秒窗口内 callback 已关闭,正常情况下返回直接由系统处理(launcher 根 Activity 被移到后台
+            // 并播回桌面动画);这里只兜第一次按返回后抽屉又被打开再关掉之类的边角。
+            finish();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 回到前台时静默拉一次自己的资料(去抖 + 失败静默),在站外换头像后也能自动更新;
+        // 侧边栏账号区由 loggedInAccount 观察者负责重绑。
+        SessionManager.INSTANCE.syncLoggedInProfileIfNeeded();
+        // 发现入口(画像)可能在别的页面变化,回来时重建抽屉
+        buildDrawerMenu();
+        // 「平板适配排版」可能刚在设置里切过，按当前开关重选底栏 / 侧栏(没变时是 no-op)
+        applyNavigationMode(getResources().getConfiguration());
+        if (baseBind.navigationRail != null) {
+            baseBind.navigationRail.updateMenuAvatar();
+        }
+        // 「底栏跟随滚动收起」同理：开关一改就重新挂 / 摘 behavior(没变时是 no-op)
+        if (bottomBarAutoHide != null) {
+            bottomBarAutoHide.setEnabled(Shaft.sSettings.isBottomBarHideOnScroll());
+        }
+        if (SessionManager.INSTANCE.isLoggedIn()) {
+            String referralCode = ceui.pixiv.ui.referral.ReferralPendingInvite.consume();
+            if (referralCode != null) {
+                Intent referral = new Intent(this, TemplateActivity.class);
+                referral.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.REFERRAL_PLAN.key);
+                referral.putExtra(ceui.pixiv.ui.referral.ReferralPlanFragment.ARG_CODE, referralCode);
+                startActivity(referral);
+            }
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // 退后台/划掉任务时兜底落盘；onPageSelected 已处理过的大部分场景这里会被去重跳过。
+        // 未登录跳登录页、或旧系统还在申请存储权限时 adapter 尚未初始化，不能用默认的 0
+        // 覆盖上一次真实位置。
+        if (baseBind.viewPager.getAdapter() != null) {
+            persistNavigationPosition(baseBind.viewPager.getCurrentItem());
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(profileReadyReceiver);
+        // View.postDelayed 不随 Activity 销毁撤回;handleDrawerAction 里有弹框的分支
+        // (以图搜图、敏感内容警示),在已销毁的 Activity 上弹会 BadTokenException。
+        if (pendingDrawerLeave != null) {
+            baseBind.drawerLayout.removeCallbacks(pendingDrawerLeave);
+            pendingDrawerLeave = null;
+        }
+    }
+
+    @Override
+    public void finish() {
+        persistNavigationPosition(baseBind.viewPager.getCurrentItem());
+        super.finish();
+    }
+
+    private void persistNavigationPosition(int position) {
+        if (position == lastPersistedNavigationPosition) {
+            return;
+        }
+        Shaft.getMMKV().putInt(Params.MAIN_ACTIVITY_NAVIGATION_POSITION, position);
+        lastPersistedNavigationPosition = position;
+    }
+
+    private int getNavigationInitPosition() {
+        int defaultPosition = 0;
+        String settingValue = Shaft.sSettings.getNavigationInitPosition();
+        if (settingValue.equals(NavigationLocationHelper.LATEST)) {
+            int latestPosition =
+                    Shaft.getMMKV().getInt(Params.MAIN_ACTIVITY_NAVIGATION_POSITION, 0);
+            return latestPosition < baseFragments.length ? latestPosition : defaultPosition;
+        }
+        NavigationLocationHelper.NavigationItem navigationValue =
+                NavigationLocationHelper.NAVIGATION_MAP.getOrDefault(settingValue, null);
+        if (navigationValue == null) {
+            return defaultPosition;
+        }
+        Class clazz = navigationValue.getInstanceClass();
+        for (int i = 0; i < baseFragments.length; i++) {
+            Fragment fragment = baseFragments[i];
+            if (clazz == fragment.getClass()) {
+                return i;
+            }
+        }
+        return defaultPosition;
+    }
+}

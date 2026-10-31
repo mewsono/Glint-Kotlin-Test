@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 聊天室 toolbar:形态与全 app 统一的 toolbar_layout.xml 完全一致(AppCompat Toolbar +
+     品牌色 + six_dp + AppBarOverlay + 居中 18sp 白字标题),只多一个 1v1 用的副标题
+     (toolbar_subtitle,peer 的 @handle,默认 GONE)。
+
+     不直接 include toolbar_layout 的原因:聊天页根布局套的是 Theme.Material3 **全主题**
+     (不是 overlay),XML 里的 ?attr/colorPrimary 会被 M3 baseline 顶掉;而且 BaseActivity
+     是 edge-to-edge,fitsSystemWindows 会把底部导航 inset 也吃进来撑高 toolbar。
+     所以背景色 + 状态栏 top padding 由 NavExt.setupToolbar 在运行时设。 -->
+<androidx.appcompat.widget.Toolbar xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/toolbar"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:elevation="@dimen/six_dp"
+    android:theme="@style/AppTheme.AppBarOverlay"
+    app:layout_constraintEnd_toEndOf="parent"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintTop_toTopOf="parent"
+    app:navigationIcon="@drawable/ic_arrow_back_white_shadow"
+    app:popupTheme="@style/AppTheme.PopupOverlay"
+    app:title=" "
+    app:titleTextColor="@android:color/white">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginEnd="@dimen/sixteen_dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/toolbar_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/always_white"
+            android:textSize="18sp"
+            tools:text="聊天室" />
+
+        <TextView
+            android:id="@+id/toolbar_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:alpha="0.75"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@color/always_white"
+            android:textSize="11sp"
+            android:visibility="gone"
+            tools:text="\@melodygardot"
+            tools:visibility="visible" />
+
+    </LinearLayout>
+
+</androidx.appcompat.widget.Toolbar>

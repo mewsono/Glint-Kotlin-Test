@@ -1,0 +1,357 @@
+package ceui.lisa.fragments
+
+import android.animation.ValueAnimator
+import android.content.Context
+import android.content.Intent
+import android.graphics.drawable.ColorDrawable
+import android.util.TypedValue
+import android.view.View
+import androidx.annotation.DrawableRes
+import androidx.annotation.StringRes
+import androidx.core.graphics.ColorUtils
+import androidx.core.widget.NestedScrollView
+import androidx.fragment.app.Fragment
+import ceui.lisa.R
+import ceui.lisa.activities.TemplateActivity
+import ceui.pixiv.witstudio.theme.WitRowStyle
+import ceui.pixiv.ui.settings.CustomThemeColor
+import ceui.pixiv.ui.navigation.TemplateRoute
+
+/**
+ * 两级设置页的目录：分类定义 + 全量设置项索引（搜索用）。
+ *
+ * idName 是分类布局里那一行的 view id 名字，搜索命中后跳到分类页并滚动高亮该行；
+ * 索引只收录用户可见的行（常驻隐藏的 r18/ai 分目录开关、lite 渠道隐藏的邮箱备份不进索引）。
+ */
+object SettingsCatalog {
+
+    const val EXTRA_CATEGORY = "settings_category"
+    const val EXTRA_HIGHLIGHT = "settings_highlight_id"
+
+    class Category(
+        val key: String,
+        @StringRes val titleRes: Int,
+        @DrawableRes val iconRes: Int,
+    )
+
+    class Entry(
+        val category: Category,
+        val idName: String,
+        @StringRes val titleRes: Int,
+        @StringRes val descRes: Int = 0,
+        /** 搜索别名：同义说法/中英文/选项值，只参与匹配不展示，无需翻译。 */
+        val keywords: String = "",
+    )
+
+    @JvmField val ACCOUNT = Category("account", R.string.account, R.drawable.ic_setcat_person)
+    @JvmField val NETWORK = Category("network", R.string.about_network, R.drawable.ic_setcat_globe)
+    @JvmField val APPEARANCE = Category("appearance", R.string.string_376, R.drawable.ic_setcat_palette)
+    @JvmField val BROWSING = Category("browsing", R.string.settings_cat_browse, R.drawable.ic_setcat_search)
+    @JvmField val VIEWING = Category("viewing", R.string.settings_cat_viewing, R.drawable.ic_setcat_photo)
+    @JvmField val BOOKMARKS = Category("bookmarks", R.string.settings_cat_bookmark, R.drawable.ic_setcat_heart)
+    @JvmField val DOWNLOAD = Category("download", R.string.string_377, R.drawable.ic_setcat_download)
+    @JvmField val AI = Category("ai", R.string.settings_cat_ai, R.drawable.ic_setcat_sparkle)
+    @JvmField val DATA = Category("data", R.string.settings_cat_data, R.drawable.ic_setcat_backup)
+    @JvmField val EXPERIMENTAL = Category("experimental", R.string.experimental_section, R.drawable.ic_setcat_science)
+
+    @JvmField
+    val categories = listOf(
+        ACCOUNT, NETWORK, APPEARANCE, BROWSING, VIEWING,
+        BOOKMARKS, DOWNLOAD, AI, DATA, EXPERIMENTAL,
+    )
+
+    val entries: List<Entry> = buildList {
+        // 账号
+        add(Entry(ACCOUNT, "user_manage", R.string.account_manage, keywords = "多账号 切换账号 添加账号 账户 switch account"))
+        if (!ceui.lisa.BuildConfig.IS_LITE) {
+            add(Entry(ACCOUNT, "edit_account", R.string.string_91, keywords = "邮箱 密码 pixiv id 绑定 email password"))
+            add(Entry(ACCOUNT, "account_backup", R.string.email_backup_settings_entry, keywords = "备份账号 恢复 邮箱 email backup"))
+        }
+        add(Entry(ACCOUNT, "edit_file", R.string.string_92, keywords = "个人资料 头像 昵称 简介 性别 生日 profile avatar"))
+        add(Entry(ACCOUNT, "work_space", R.string.string_267, keywords = "作业环境 workspace 电脑 显示器 手绘板"))
+        add(Entry(ACCOUNT, "r18_space", R.string.string_398, keywords = "r18 r18g 成人 限制级 涩图 网页设置 adult"))
+        add(Entry(ACCOUNT, "premium_space", R.string.string_399, keywords = "会员 高级会员 订阅 premium"))
+        // 应用锁（issue #1197）。别名按整串子串匹配，「指纹解锁」「打开要密码」这类连写说法各铺一遍；
+        // 「自动锁定」行只在开启后可见，关着时 maybeHighlight 会自动跳过滚动/闪烁
+        add(Entry(ACCOUNT, "app_lock_rela", R.string.app_lock_title, R.string.app_lock_desc, keywords = "应用锁 app锁 软件锁 锁定 上锁 加锁 密码 密码锁 打开要密码 启动密码 指纹 指纹解锁 指纹锁 面部 人脸 面容 解锁 生物识别 屏幕锁 隐私 防偷看 最近任务 多任务 预览 app lock password passcode pin fingerprint face biometric privacy recents"))
+        add(Entry(ACCOUNT, "app_lock_timeout_rela", R.string.app_lock_timeout_title, R.string.app_lock_timeout_desc, keywords = "应用锁 自动锁定 锁定时间 多久锁定 后台 离开 超时 立即 分钟 auto lock timeout"))
+        add(Entry(ACCOUNT, "login_out", R.string.login_out, keywords = "退出 登出 注销 切换 logout sign out"))
+
+        // 网络
+        add(Entry(NETWORK, "direct_connect_rela", R.string.open_direct_connection, R.string.see_pixiv_ez, keywords = "直连 代理 免代理 翻墙 梯子 vpn sni direct proxy"))
+        add(Entry(NETWORK, "use_secure_dns_rela", R.string.use_secure_dns_title, R.string.use_secure_dns_summary, keywords = "dns doh cloudflare 域名解析 加密dns"))
+        add(Entry(NETWORK, "image_host_rela", R.string.image_host_title, keywords = "图片代理 加速 反代 镜像 自定义域名 pixiv.cat pixiv.re pximg image proxy mirror"))
+        add(Entry(NETWORK, "github_proxy_rela", R.string.github_proxy_title, R.string.github_proxy_summary, keywords = "github 加速 加速地址 加速站 代理 镜像 更新 下载 模型 表情包 gh-proxy proxy mirror accelerator"))
+        add(Entry(NETWORK, "show_large_thumbnail_image_rela", R.string.string_450, R.string.string_334, keywords = "缩略图 大图 画质 流量 省流 加载速度 thumbnail"))
+        add(Entry(NETWORK, "show_original_preview_image_rela", R.string.string_413, R.string.string_334, keywords = "原图 高清 画质 详情大图 加载 original"))
+
+        // 界面（与布局分段同序：主题与语言 → 导航与主页 → 列表展示 → 桌面小组件）
+        add(Entry(APPEARANCE, "theme_mode_rela", R.string.theme_mode, keywords = "夜间 暗色 深色 黑暗 日间 浅色 白天 跟随系统 dark light night mode"))
+        // 「主题色彩」这一行底下藏着自定义 HEX（issue #1014），别名要单独铺 —— [search] 是整串
+        // 子串匹配，中文不分词，用户敲「自定义颜色」时 haystack 里必须有这一整串才命中，
+        // 光有「自定义」+「颜色」两个独立词是搜不到的。
+        // 自定义档只在 Android 11+ 存在，别名跟着条件加：老机器搜过去也没那一行，不如搜不到。
+        val customColorAliases = if (CustomThemeColor.isSupported) {
+            // 「自定义主题色彩」写全，它自带涵盖「自定义主题色」和「主题色彩」两种敲法
+            " 自定义颜色 自定义主题色彩 自定义色值 十六进制 hex 色号 取色器 拾色器 调色板 custom color color picker"
+        } else ""
+        add(Entry(APPEARANCE, "color_select_rela", R.string.string_324, keywords = "主题色 颜色 配色 强调色 粉色 accent color$customColorAliases"))
+        add(Entry(APPEARANCE, "tag_legibility_boost_rela", R.string.tag_legibility_boost, keywords = "亮暗度 标签原文 正文 标签 辨识度 明暗 亮度 对比度 可读性 清晰 胶囊 增强 无障碍 白天 黑暗 brightness lightness contrast readability tag text"))
+        add(Entry(APPEARANCE, "tag_translation_color_rela", R.string.tag_translation_color, keywords = "标签 译文 翻译 颜色 跟随主题 主题色彩 标签译文 tag translation color"))
+        add(Entry(APPEARANCE, "app_language_rela", R.string.language, keywords = "语言 简体 繁体 英文 日文 韩文 中文 language english"))
+        add(Entry(APPEARANCE, "predictive_back_rela", R.string.setting_predictive_back, R.string.setting_predictive_back_desc, keywords = "预测返回 返回手势 侧滑 边缘返回 边缘侧滑 花屏 rom 降级 传统返回 逐页 逐项 按页 按页面 predictive back gesture"))
+        add(Entry(APPEARANCE, "navigation_init_position_rela", R.string.string_426, keywords = "启动页 默认页 初始页 首页 导航 start page"))
+        add(Entry(APPEARANCE, "bottom_bar_order_rela", R.string.string_342, keywords = "底部导航 tab 顺序 排序 页签 bottom bar"))
+        add(Entry(APPEARANCE, "bottom_bar_scroll_hide_rela", R.string.bottom_bar_scroll_hide, R.string.bottom_bar_scroll_hide_desc, keywords = "底栏 底部导航 导航栏 收起 隐藏 自动隐藏 固定 常显 滚动 滑动 bottom bar navigation hide on scroll"))
+        add(Entry(APPEARANCE, "top_bar_scroll_hide_rela", R.string.top_bar_scroll_hide, R.string.top_bar_scroll_hide_desc, keywords = "顶栏 标题栏 工具栏 推荐页 收起 隐藏 自动隐藏 固定 常显 滚动 滑动 top bar toolbar hide on scroll"))
+        add(Entry(APPEARANCE, "use_account_avatar_as_drawer_icon_rela", R.string.use_account_avatar_as_drawer_icon, R.string.use_account_avatar_as_drawer_icon_desc, keywords = "头像 账号头像 侧边栏 抽屉 菜单 左上角 图标 avatar profile drawer menu icon sidebar"))
+        add(Entry(APPEARANCE, "recommend_page_order_rela", R.string.recommend_page_content, R.string.recommend_page_content_desc, keywords = "推荐作品 热门标签 推荐页 顺序 排序 插画 小说 recommend hot tags tab order"))
+        add(Entry(APPEARANCE, "main_view_r18_rela", R.string.string_359, keywords = "r18 r页 主页 首页 涩图"))
+        // 别名按整串子串匹配（同上），「平板双栏」「左右分屏」这类连写说法各铺一遍
+        add(Entry(APPEARANCE, "tablet_layout_rela", R.string.tablet_layout, R.string.tablet_layout_desc, keywords = "平板 平板适配 平板排版 平板布局 双栏 平板双栏 侧边栏 侧边导航 导航栏 大屏 宽屏 折叠屏 瀑布流 列数 详情页 tablet layout large screen foldable navigation rail sidebar"))
+        add(Entry(APPEARANCE, "line_count_rela", R.string.string_336, keywords = "列数 几列 瀑布流 网格 columns grid"))
+        add(Entry(APPEARANCE, "illust_list_layout_rela", R.string.illust_list_layout, keywords = "布局 列表布局 图片列表 瀑布流 方格 网格 等宽等高 齐行 等高不等宽 单列 全宽 大图 layout masonry grid justified single column"))
+        add(Entry(APPEARANCE, "layout_mode_rela", R.string.layout_mode, keywords = "瀑布流 线性 列表 关注动态 staggered linear"))
+        add(Entry(APPEARANCE, "show_illust_card_bookmark_button_rela", R.string.show_illust_card_bookmark_button_setting, keywords = "收藏 喜欢 爱心 收藏按钮 喜欢按钮 隐藏收藏按钮 隐藏爱心 去掉爱心 卡片 瀑布流 插画 漫画 bookmark like heart button card"))
+        add(Entry(APPEARANCE, "show_novel_card_tags_rela", R.string.show_novel_card_tags_setting, keywords = "小说标签 卡片 tag novel"))
+        add(Entry(APPEARANCE, "show_novel_card_tag_translations_rela", R.string.show_novel_card_tag_translations_setting, keywords = "小说标签译文 小说标签翻译 小说列表标签译文 小说列表标签翻译 标签译文 标签翻译 tag translation novel"))
+        add(Entry(APPEARANCE, "widget_refresh_interval_rela", R.string.v3_widget_refresh_interval_title, keywords = "小组件 桌面 插件 widget 刷新 间隔 换图 频率 refresh interval"))
+        add(Entry(APPEARANCE, "muzei_settings_rela", R.string.muzei_settings_title, R.string.muzei_settings_entry_desc, keywords = "muzei 动态壁纸 壁纸 自动换壁纸 live wallpaper 桌面"))
+        // 别名按整串子串匹配（同上），所以「隐藏按钮」「挡画面」这类连写说法要各铺一遍
+        val widgetHideAliases = "小组件 小工具 桌面 插件 widget 按钮 隐藏 隐藏按钮 去掉按钮 关闭按钮 遮挡 挡住 挡画面 遮挡画面 button hide"
+        add(Entry(APPEARANCE, "widget_hide_bookmark_button_rela", R.string.v3_widget_hide_bookmark_button, R.string.v3_widget_hide_bookmark_button_desc, keywords = "$widgetHideAliases 收藏 喜欢 爱心 收藏按钮 喜欢按钮 bookmark like heart"))
+        add(Entry(APPEARANCE, "widget_hide_refresh_button_rela", R.string.v3_widget_hide_refresh_button, R.string.v3_widget_hide_refresh_button_desc, keywords = "$widgetHideAliases 刷新 换一张 换图 刷新按钮 refresh"))
+
+        // 浏览与搜索
+        add(Entry(BROWSING, "auto_refresh_home_feed_rela", R.string.auto_refresh_home_feed, R.string.auto_refresh_home_feed_desc, keywords = "自动刷新 首页 推荐 启动 冷启动 换一批 错过 auto refresh home recommend"))
+        if (!ceui.lisa.BuildConfig.IS_LITE) {
+            add(Entry(BROWSING, "include_r18_in_home_feed_rela", R.string.include_r18_in_home_feed, R.string.include_r18_in_home_feed_desc, keywords = "首页 r18 推荐 官网 涩图 成人 限制 home r18 recommend"))
+        }
+        add(Entry(BROWSING, "save_history_rela", R.string.save_view_history, keywords = "浏览历史 历史记录 足迹 history"))
+        add(Entry(BROWSING, "cloud_history_sync_rela", R.string.cloud_history_sync, keywords = "云同步 历史同步 多设备 cloud sync"))
+        add(Entry(BROWSING, "clear_cloud_history_rela", R.string.clear_cloud_history, keywords = "清除历史 删除云端 隐私 clear history"))
+        add(Entry(BROWSING, "filter_comment_rela", R.string.string_379, keywords = "评论 垃圾 广告 屏蔽 spam comment"))
+        add(Entry(BROWSING, "r18_filter_default_enable_rela", R.string.string_414, R.string.string_415, keywords = "r18 过滤 屏蔽 安全模式 safe filter"))
+        add(Entry(BROWSING, "delete_ai_illust_rela", R.string.delete_ai_illust, keywords = "ai 屏蔽ai 不看ai ai生成 aigc 过滤"))
+        // 下两行只在「不显示AI生成的作品」开着时可见；关着时 maybeHighlight 会自动跳过滚动/闪烁
+        add(Entry(BROWSING, "ai_block_strength_rela", R.string.ai_block_strength, keywords = "ai 屏蔽 效果 级别 强度 模糊 粒子 打码 完全不显示 blur"))
+        add(Entry(BROWSING, "ai_tag_rules_rela", R.string.ai_tag_rules, keywords = "ai 标签 tag 识别 判定 生成 内置 自定义 规则 屏蔽"))
+        add(Entry(BROWSING, "ai_block_exempt_rela", R.string.ai_block_exempt_authors, keywords = "ai 屏蔽 豁免 白名单 作者 画师 例外 放行 exempt whitelist author"))
+        add(Entry(BROWSING, "filter_bookmarked_rela", R.string.filter_bookmarked_title, keywords = "已收藏 过滤 去重 排行榜 首页推荐 推荐 动态 搜索 rank following search bookmark home recommend"))
+        add(Entry(BROWSING, "novel_filter_min_text_length_rela", R.string.novel_filter_min_text_length, R.string.novel_filter_min_text_length_desc, keywords = "小说 字数 太短 过短 屏蔽 刷屏 广告 spam novel length"))
+        add(Entry(BROWSING, "novel_filter_max_text_length_rela", R.string.novel_filter_max_text_length, R.string.novel_filter_max_text_length_desc, keywords = "小说 字数 太长 过长 屏蔽 spam novel length"))
+        add(Entry(BROWSING, "novel_filter_max_tag_name_length_rela", R.string.novel_filter_max_tag_name_length, R.string.novel_filter_max_tag_name_length_desc, keywords = "小说 标签 tag 超长 过长 屏蔽 广告 刷屏 spam"))
+        add(Entry(BROWSING, "search_filter_rela", R.string.search_result_filter, keywords = "收藏量 热度 users入り 万users 筛选 bookmarks filter"))
+        // 别名按整串子串匹配，「热度排序」「额度」这些说法各铺一遍
+        add(Entry(BROWSING, "search_popular_default_rela", R.string.search_popular_default, R.string.search_popular_default_desc, keywords = "热度 热度排序 按热度 人气 人气排序 默认排序 额度 配额 省额度 留着 热度预览 预览 免费 free popular popularity sort quota default"))
+        add(Entry(BROWSING, "search_default_sort_type_rela", R.string.string_439, keywords = "排序 时间 热门 最新 最旧 sort order"))
+        add(Entry(BROWSING, "search_exit_confirm_rela", R.string.search_exit_confirm, R.string.search_exit_confirm_desc, keywords = "退出 返回 误触 二次确认 确认退出 弹窗 back exit confirm"))
+        // 别名按整串子串匹配（同上），「回到顶部」「回顶刷新」「悬浮按钮」这些连写说法各铺一遍
+        add(Entry(BROWSING, "feed_back_to_top_fab_rela", R.string.feed_back_to_top_fab, R.string.feed_back_to_top_fab_desc, keywords = "回顶 回到顶部 置顶 回顶刷新 刷新 悬浮按钮 悬浮球 浮动按钮 圆形按钮 搜索结果 画师主页 作者页 fab back to top scroll top refresh floating button"))
+        add(Entry(BROWSING, "scroll_edge_haptic_rela", R.string.settings_scroll_edge_haptic, R.string.settings_scroll_edge_haptic_desc, keywords = "振动 震动 触感 触觉 震感 马达 滑到底 滑到顶 到底 到顶 边缘 边界 回弹 列表 滚动 关掉振动 关闭振动 不要震动 haptic vibration vibrate scroll edge overscroll"))
+        add(Entry(BROWSING, "synonym_dict_enable_rela", R.string.synonym_dict_enable, keywords = "同义词 词典 别名 标签翻译 synonym"))
+        add(Entry(BROWSING, "synonym_dict_rela", R.string.synonym_dict_title, keywords = "同义词 词典 管理 导入 导出 合并 synonym"))
+        add(Entry(BROWSING, "chrome_custom_tabs_rela", R.string.chrome_custom_tabs_title, R.string.chrome_custom_tabs_desc, keywords = "chrome custom tabs 浏览器 网页 链接 外部链接 打开方式 标签页 登录 注册 cct browser url link"))
+
+        // 看图与详情（FAB 顺序行随 V3 开关显隐，紧贴 V3 行）
+        add(Entry(VIEWING, "illust_detail_v3_rela", R.string.illust_detail_v3, keywords = "v3 沉浸式 详情页 新版 详情"))
+        add(Entry(VIEWING, "artwork_v3_fab_position_rela", R.string.artwork_v3_fab_position_title, R.string.artwork_v3_fab_position_desc, keywords = "按钮位置 收藏按钮 下载按钮 靠左 靠右 居中 单手 悬浮胶囊 fab position one hand"))
+        add(Entry(VIEWING, "artwork_v3_fab_order_rela", R.string.artwork_v3_fab_order_title, keywords = "按钮顺序 下载按钮 收藏按钮 左右 fab"))
+        add(Entry(VIEWING, "artwork_v3_show_comments_rela", R.string.artwork_v3_show_comments_title, R.string.artwork_v3_show_comments_desc, keywords = "评论 评论区 关闭评论 隐藏评论 不看评论 留言 comments hide"))
+        add(Entry(VIEWING, "artwork_v3_auto_expand_rela", R.string.artwork_v3_auto_expand_title, R.string.artwork_v3_auto_expand_desc, keywords = "多图 多P 多页 自动展开 展开剩余 第一页 多张 expand multi page"))
+        add(Entry(VIEWING, "detail_panel_collapsed_rela", R.string.detail_panel_collapsed_default, R.string.detail_panel_collapsed_default_desc, keywords = "折叠 收起 默认折叠 默认收起 作品详情 作品档案 详情面板 档案 collapse fold details profile"))
+        add(Entry(VIEWING, "novel_direct_reader_rela", R.string.novel_direct_reader, R.string.novel_direct_reader_desc, keywords = "小说 正文 阅读器 略过详情 跳过详情 直接阅读 novel reader skip detail"))
+        add(Entry(VIEWING, "transform_type_rela", R.string.string_393, keywords = "翻页 动画 切页 过渡 特效 transformer"))
+        add(Entry(VIEWING, "ugoira_rife_enable_rela", R.string.ugoira_rife_enable, R.string.ugoira_rife_enable_desc, keywords = "动图 补帧 插帧 rife 帧率 60fps 顺滑 丝滑 ugoira interpolation"))
+        add(Entry(VIEWING, "ugoira_auto_play_rela", R.string.ugoira_auto_play, keywords = "动图 自动播放 自动下载 播放 gif ugoira auto play download"))
+        add(Entry(VIEWING, "keep_status_bar_when_view_image_rela", R.string.keep_status_bar_when_view_image, keywords = "状态栏 刘海 挖孔 全屏 沉浸 notch"))
+        add(Entry(VIEWING, "immersive_when_view_image_rela", R.string.immersive_when_view_image, keywords = "沉浸 沉浸式 全屏 默认全屏 隐藏状态栏 隐藏工具栏 大图 二级详情 看图 immersive fullscreen hide status bar"))
+        add(Entry(VIEWING, "illust_detail_keep_screen_on_rela", R.string.string_451, keywords = "常亮 息屏 熄屏 屏幕 keep screen on"))
+        add(Entry(VIEWING, "comic_reader_auto_rotate_image_rela", R.string.comic_reader_auto_rotate_image, keywords = "阅读器 漫画 横屏 横向 自动旋转 旋转 屏幕 orientation landscape comic reader"))
+        add(Entry(VIEWING, "double_tap_zoom_mode_rela", R.string.double_tap_zoom_mode_title, keywords = "双击 放大 缩放 默认 三级 增量 智能 zoom"))
+        add(Entry(VIEWING, "custom_zoom_scale_rela", R.string.custom_zoom_scale_title, R.string.custom_zoom_scale_link_text, keywords = "缩放 增量 倍率 三级 zoom scale"))
+        add(Entry(VIEWING, "long_press_behavior_rela", R.string.long_press_behavior_title, keywords = "长按 长按行为 无 优先缩小一级 复原至最小 复位 还原 缩放 缩小 long press reset"))
+        // 别名按整串子串匹配（同上），「视口联动」「退出归位」这类连写说法各铺一遍
+        add(Entry(VIEWING, "viewer_viewport_link_rela", R.string.viewer_viewport_link_title, keywords = "大图 详情页 视口 联动 跟随 不跟随 仅已展开 自动展开 同步 归位 缩回 退出 翻页 滚动 位置 viewport link follow off expanded auto scroll page position exit"))
+
+        // 收藏与互动
+        add(Entry(BOOKMARKS, "show_like_button_rela", R.string.string_335, keywords = "私密收藏 非公开 私人 private bookmark"))
+        add(Entry(BOOKMARKS, "private_follow_rela", R.string.private_follow_by_default, keywords = "私密关注 悄悄关注 非公开 私人 关注 private follow"))
+        add(Entry(BOOKMARKS, "hide_star_bar_rela", R.string.string_371, keywords = "隐藏 收藏按钮 我的收藏"))
+        // 别名按整串子串匹配，「关闭震动」「收藏按钮震动」这类连写说法各铺一遍
+        add(Entry(BOOKMARKS, "like_haptic_rela", R.string.settings_like_haptic, R.string.settings_like_haptic_desc, keywords = "振动 震动 触感 触觉 震感 手感 马达 触感反馈 震动反馈 收藏振动 收藏震动 收藏按钮震动 关注振动 关注震动 爱心 点赞 关掉振动 关掉震动 关闭振动 关闭震动 不要震动 haptic vibration vibrate"))
+        add(Entry(BOOKMARKS, "filter_invalid_bookmarks_rela", R.string.filter_invalid_bookmarks, keywords = "失效 无效 404 收藏夹 已删除作品"))
+        add(Entry(BOOKMARKS, "select_all_tag_rela", R.string.string_372, keywords = "标签 全选 tag 收藏"))
+        add(Entry(BOOKMARKS, "show_related_when_star_rela", R.string.string_396, keywords = "相关作品 关联 推荐 related"))
+        add(Entry(BOOKMARKS, "auto_follow_after_star_rela", R.string.string_456, keywords = "自动关注 关注 follow"))
+        add(Entry(BOOKMARKS, "auto_download_after_star_rela", R.string.auto_download_after_star, keywords = "自动下载 收藏下载 小说 缓存 download"))
+        add(Entry(BOOKMARKS, "download_auto_post_like_rela", R.string.string_409, keywords = "自动收藏 点赞 下载 like"))
+
+        // 下载
+        add(Entry(DOWNLOAD, "storage_choice_rela", R.string.setting_storage_choice, keywords = "存储 保存位置 目录 文件夹 pictures downloads saf sd卡 storage"))
+        add(Entry(DOWNLOAD, "file_name_rela", R.string.download_path_title, R.string.download_path_entry_desc, keywords = "文件名 命名 模板 路径 目录 分目录 重命名 filename path template"))
+        add(Entry(DOWNLOAD, "overwrite_policy_rela", R.string.setting_overwrite_policy, keywords = "重复 覆盖 跳过 重命名 副本 同名 duplicate overwrite"))
+        add(Entry(DOWNLOAD, "ugoira_save_format_rela", R.string.setting_ugoira_save_format, R.string.setting_ugoira_save_format_desc, keywords = "动图 ugoira gif mp4 视频 格式 保存 体积 format video"))
+        add(Entry(DOWNLOAD, "page_index_rela", R.string.setting_page_index, keywords = "页码 序号 p0 p1 多图 起始"))
+        add(Entry(DOWNLOAD, "default_image_resolution_rela", R.string.setting_default_image_resolution, keywords = "清晰度 分辨率 画质 原图 保存 resolution"))
+        add(Entry(DOWNLOAD, "write_exif_tags_rela", R.string.setting_write_exif_tags_title, R.string.setting_write_exif_tags_desc, keywords = "标签 关键词 exif xmp 元数据 相册 keywords metadata tags dc:subject"))
+        add(Entry(DOWNLOAD, "default_novel_format_rela", R.string.setting_default_novel_format, keywords = "小说 格式 txt epub pdf markdown 导出 export"))
+        add(Entry(DOWNLOAD, "novel_epub_on_images_rela", R.string.setting_novel_epub_on_images, R.string.setting_novel_epub_on_images_desc, keywords = "小说 插图 图片 epub txt 自动 格式 illustration image"))
+        add(Entry(DOWNLOAD, "novel_header_rela", R.string.novel_header_settings_title, R.string.novel_header_settings_entry_desc, keywords = "信息头 元信息 头部 字段 作者信息 txt"))
+        add(Entry(DOWNLOAD, "download_limit_type_rela", R.string.string_452, keywords = "限制 wifi 流量 蜂窝 移动网络 limit"))
+        add(Entry(DOWNLOAD, "max_concurrent_downloads_rela", R.string.setting_max_concurrent_downloads, keywords = "并发 同时 多任务 线程 速度 concurrent"))
+        add(Entry(DOWNLOAD, "illust_long_press_download_rela", R.string.string_405, keywords = "长按 下载 long press"))
+        add(Entry(DOWNLOAD, "download_toasts_rela", R.string.download_toast_entry_title, R.string.download_toast_dialog_hint, keywords = "提示 通知 弹窗 消息 完成 失败 入队 队列 批量 汇总 进度 安静 静音 不弹 关闭 关掉 toast notice"))
+        add(Entry(DOWNLOAD, "silent_download_rela", R.string.setting_silent_download_title, R.string.setting_silent_download_desc, keywords = "低调 静默 隐藏 隐身 最近 微信 qq 相册 时间 recent hide silent wechat"))
+        add(Entry(DOWNLOAD, "aria2_rela", R.string.aria2_settings_title, R.string.aria2_settings_entry_desc, keywords = "aria2 远程 nas rpc 服务器 remote"))
+
+        // AI 功能
+        add(Entry(AI, "default_upscale_model_rela", R.string.string_default_upscale_model, keywords = "超分 放大 高清 修复 esrgan realcugan waifu2x upscale ai放大"))
+        add(Entry(AI, "default_rembg_model_rela", R.string.string_default_rembg_model, keywords = "抠图 去背景 背景移除 透明 rembg"))
+        add(Entry(AI, "rife_model_rela", R.string.string_rife_model, keywords = "补帧 插帧 rife 动图 帧率 ugoira interpolation"))
+        add(Entry(AI, "bubble_detector_model_rela", R.string.string_bubble_detector_model, keywords = "气泡 文本框 检测 漫画翻译 detector"))
+        add(Entry(AI, "ocr_model_rela", R.string.string_ocr_model, keywords = "ocr 识别 文字 日文 漫画翻译"))
+        add(Entry(AI, "cloud_translate_rela", R.string.cloud_translate_title, R.string.cloud_translate_desc, keywords = "翻译 云翻译 云端 服务器 额度 评论翻译 漫画翻译 translate cloud"))
+        add(Entry(AI, "ai_translate_rela", R.string.ai_translate_settings_title, R.string.ai_translate_settings_entry_desc, keywords = "翻译 自定义 接口 openai gpt deepseek sakura ollama llm api 评论翻译 漫画翻译 translate"))
+
+        // 备份与缓存
+        add(Entry(DATA, "backup_rela", R.string.string_420, keywords = "备份 导出 设置 json backup"))
+        add(Entry(DATA, "restore_rela", R.string.string_421, keywords = "还原 恢复 导入 restore"))
+        add(Entry(DATA, "webdav_rela", R.string.webdav_settings_title, R.string.webdav_settings_entry_desc, keywords = "webdav 坚果云 nextcloud pcloud 网盘 nas 同步 多设备 备份 还原 自动备份 sync"))
+        add(Entry(DATA, "moon_upload_rela", R.string.moon_upload_title, keywords = "云端 上传 配置 同步 cloud upload"))
+        add(Entry(DATA, "moon_sync_rela", R.string.moon_manual_sync_title, keywords = "云端 下载 配置 同步 cloud sync"))
+        add(Entry(DATA, "clear_image_cache", R.string.string_101, keywords = "缓存 清理 空间 占用 图片 cache"))
+        add(Entry(DATA, "clear_gif_cache", R.string.string_102, keywords = "缓存 清理 gif 动图 cache"))
+        add(Entry(DATA, "clear_bulk_download_cache", R.string.clear_bulk_download_cache, keywords = "批量下载 数据库 清理 占用 瘦身 空间 cache"))
+        add(Entry(DATA, "image_cache_quota_rela", R.string.setting_image_cache_quota, keywords = "图片缓存 缓存 上限 预期 占用 空间 自动清理 淘汰 大小 cache limit size quota"))
+
+        // 试验性
+        // 公开聊天室横幅开关在 google(Play) 渠道不出现——认 IS_LITE
+        // 而不是 debug 口径，lite 的 debug 包同样没有（与 FragmentSettingsExperimental 一致）。
+        // 不进索引 = 搜索不会跳到隐藏行，目录页那条子项预览也自动少掉这几项。
+        if (!ceui.lisa.BuildConfig.IS_LITE) {
+            add(Entry(EXPERIMENTAL, "show_chat_room_push_banner_rela", R.string.setting_show_chat_room_push_banner, keywords = "推送 横幅 新消息 通知 banner push"))
+        }
+        add(Entry(EXPERIMENTAL, "auto_snapshot_quota_rela", R.string.setting_auto_snapshot_quota, R.string.setting_auto_snapshot_quota_desc, keywords = "自动快照 离线快照 大小 上限 配额 存储 不限 snapshot quota limit size"))
+        add(Entry(EXPERIMENTAL, "auto_snapshot_on_bookmark_rela", R.string.setting_auto_snapshot_on_bookmark, R.string.setting_auto_snapshot_on_bookmark_desc, keywords = "自动快照 离线快照 收藏 静默 后台 snapshot bookmark auto"))
+        add(Entry(EXPERIMENTAL, "auto_snapshot_on_illust_manga_rela", R.string.setting_auto_snapshot_on_illust_manga, R.string.setting_auto_snapshot_on_illust_manga_desc, keywords = "自动快照 离线快照 插画 漫画 反复进入 长时间驻留 静默 后台 snapshot auto behavior dwell revisit"))
+        add(Entry(EXPERIMENTAL, "log_file_enable_rela", R.string.setting_log_file_enable, R.string.setting_log_file_desc, keywords = "日志 文件 调试 落盘 log timber"))
+    }
+
+    fun entriesOf(category: Category): List<Entry> = entries.filter { it.category === category }
+
+    /**
+     * 分词 AND 匹配：每个词都要命中 标题/描述/分类名/keywords 之一；
+     * 结果按相关度排序（标题命中 > 标题+描述命中 > 仅别名/分类命中），同档保持目录顺序。
+     */
+    fun search(context: Context, query: String): List<Entry> {
+        val tokens = query.trim().split(WHITESPACE).filter { it.isNotEmpty() }
+        if (tokens.isEmpty()) return emptyList()
+        val ranked = ArrayList<Pair<Entry, Int>>()
+        for (entry in entries) {
+            val title = context.getString(entry.titleRes)
+            val desc = if (entry.descRes != 0) context.getString(entry.descRes) else ""
+            val haystack = buildString {
+                append(title).append(' ').append(desc).append(' ')
+                append(context.getString(entry.category.titleRes)).append(' ')
+                append(entry.keywords)
+            }
+            if (!tokens.all { haystack.contains(it, ignoreCase = true) }) continue
+            val rank = when {
+                tokens.all { title.contains(it, ignoreCase = true) } -> 0
+                tokens.all { title.contains(it, true) || desc.contains(it, true) } -> 1
+                else -> 2
+            }
+            ranked.add(entry to rank)
+        }
+        ranked.sortBy { it.second } // 稳定排序，同档保持目录顺序
+        return ranked.map { it.first }
+    }
+
+    private val WHITESPACE = Regex("\\s+")
+
+    @JvmStatic
+    @JvmOverloads
+    fun open(context: Context, category: Category, highlightIdName: String? = null) {
+        val intent = Intent(context, TemplateActivity::class.java)
+        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.SETTINGS_CATEGORY.key)
+        intent.putExtra(EXTRA_CATEGORY, category.key)
+        if (!highlightIdName.isNullOrEmpty()) {
+            intent.putExtra(EXTRA_HIGHLIGHT, highlightIdName)
+        }
+        context.startActivity(intent)
+    }
+
+    @JvmStatic
+    fun fragmentFor(categoryKey: String?): Fragment {
+        return when (categoryKey) {
+            ACCOUNT.key -> FragmentSettingsAccount()
+            NETWORK.key -> FragmentSettingsNetwork()
+            APPEARANCE.key -> FragmentSettingsAppearance()
+            BROWSING.key -> FragmentSettingsBrowsing()
+            VIEWING.key -> FragmentSettingsViewing()
+            BOOKMARKS.key -> FragmentSettingsBookmarks()
+            DOWNLOAD.key -> FragmentSettingsDownload()
+            AI.key -> FragmentSettingsAi()
+            DATA.key -> FragmentSettingsData()
+            EXPERIMENTAL.key -> FragmentSettingsExperimental()
+            else -> FragmentSettingsHub()
+        }
+    }
+
+    /**
+     * 把设置页分段行的中性底色换成主题 tint。
+     *
+     * 实现已搬到 [WitRowStyle.applyThemedRowBg]（分段行是通用 UI 基建，不该住在设置页的目录类里）。
+     * 这里留一层同签名委托，10 个调用方一行都不用改。
+     */
+    @JvmStatic
+    fun applyThemedRowBg(view: View) {
+        WitRowStyle.applyThemedRowBg(view)
+    }
+
+    /**
+     * 搜索跳转的落点高亮：分类页打开时若 intent 带 EXTRA_HIGHLIGHT，
+     * 滚动到那一行并用主题色 foreground 闪一下。
+     */
+    @JvmStatic
+    fun maybeHighlight(fragment: Fragment, root: View) {
+        val idName = fragment.activity?.intent?.getStringExtra(EXTRA_HIGHLIGHT) ?: return
+        val viewId = root.resources.getIdentifier(idName, "id", root.context.packageName)
+        if (viewId == 0) return
+        val target = root.findViewById<View>(viewId) ?: return
+        val scroll = root.findViewById<NestedScrollView>(R.id.scroll_view) ?: return
+        root.post {
+            // 条件隐藏的行（如 V3 关闭时的 FAB 顺序、词典关闭时的管理入口）此刻是 GONE：
+            // 没有布局位置，滚动/闪烁都是错的，直接正常打开页面即可。
+            if (!target.isShown || target.height == 0) {
+                return@post
+            }
+            var y = 0
+            var v: View = target
+            while (v !== scroll) {
+                y += v.top
+                v = (v.parent as? View) ?: break
+            }
+            scroll.smoothScrollTo(0, (y - scroll.height / 4).coerceAtLeast(0))
+            flash(target)
+        }
+    }
+
+    private fun flash(target: View) {
+        val tv = TypedValue()
+        target.context.theme.resolveAttribute(androidx.appcompat.R.attr.colorPrimary, tv, true)
+        val overlay = ColorDrawable(ColorUtils.setAlphaComponent(tv.data, 255))
+        overlay.alpha = 0
+        target.foreground = overlay
+        ValueAnimator.ofInt(0, 60, 60, 0).apply {
+            duration = 1800
+            startDelay = 250
+            addUpdateListener {
+                overlay.alpha = it.animatedValue as Int
+                target.invalidate()
+            }
+            start()
+        }
+    }
+}

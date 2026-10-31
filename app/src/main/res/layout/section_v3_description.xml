@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingHorizontal="12dp"
+    android:paddingBottom="18dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:letterSpacing="0.12"
+            android:text="@string/novel_desc_label"
+            android:textAllCaps="true"
+            android:textColor="@color/v3_text_3"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <ImageView
+            android:id="@+id/desc_download"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="12dp"
+            android:contentDescription="@string/novel_actions_download"
+            android:src="@drawable/ic_file_download_black_24dp"
+            app:tint="@color/v3_text_3" />
+
+        <FrameLayout
+            android:id="@+id/desc_translate_container"
+            android:layout_width="48dp"
+            android:layout_height="48dp">
+
+            <ImageView
+                android:id="@+id/desc_translate"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:padding="12dp"
+                android:contentDescription="@string/string_translate_caption"
+                android:src="@drawable/ic_baseline_translate_24"
+                app:tint="@color/v3_text_3" />
+
+            <ceui.lisa.view.SeamlessCircularProgressIndicator
+                android:id="@+id/desc_translate_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:indicatorColor="@color/v3_text_3"
+                app:indicatorInset="0dp"
+                app:indicatorSize="20dp"
+                app:trackThickness="2.5dp" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- 横向留白只由根布局的 12dp 提供，与「简介」标题头、标签区左缘对齐。这里曾残留
+         独立成段时代的 20dp，叠成 32dp，正文比标题缩进一截。 -->
+    <org.sufficientlysecure.htmltextview.HtmlTextView
+        android:id="@+id/description"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:alpha="0.78"
+        android:lineSpacingMultiplier="1.65"
+        android:paddingBottom="16dp"
+        android:textColor="@color/v3_text_1"
+        android:textColorLink="@color/v3_blue"
+        android:textIsSelectable="true"
+        android:textSize="14sp" />
+
+    <!-- #1053: 展开/收起点击区拉满整行（48dp 高 + 波纹），不再只有文字那么大一块 -->
+    <TextView
+        android:id="@+id/desc_toggle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:minHeight="48dp"
+        android:text="@string/v3_desc_expand"
+        android:textColor="@color/v3_blue"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+</LinearLayout>

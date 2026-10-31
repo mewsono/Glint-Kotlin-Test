@@ -1,0 +1,31 @@
+package ceui.lisa.view;
+
+import android.graphics.Rect;
+import android.view.View;
+
+import androidx.recyclerview.widget.RecyclerView;
+
+public class SpacesItemWithHeadDecoration extends RecyclerView.ItemDecoration {
+
+    private final int space;
+
+    public SpacesItemWithHeadDecoration(int space) {
+        this.space = space;
+    }
+
+    @Override
+    public void getItemOffsets(Rect outRect, View view, RecyclerView parent, RecyclerView.State state) {
+
+        outRect.bottom = space;
+
+        int position = parent.getChildAdapterPosition(view);
+
+        if (position == 0) {
+            outRect.top = 0;
+            outRect.right = 0;
+            outRect.left = 0;
+        } else {
+            SpacesItemDecoration.applyColumnOffsets(outRect, view, position - 1, parent, space);
+        }
+    }
+}

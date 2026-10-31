@@ -1,0 +1,41 @@
+package ceui.lisa.utils;
+
+import android.content.Context;
+import android.content.Intent;
+
+import ceui.lisa.R;
+import ceui.lisa.interfaces.IExecutor;
+import ceui.pixiv.api.model.Illust;
+
+/**
+ * 分享
+ */
+public abstract class ShareIllust implements IExecutor {
+
+    public static final String URL_Head = "https://www.pixiv.net/artworks/";
+    public static final String USER_URL_Head = "https://www.pixiv.net/users/";
+    private final Illust mIllust;
+    private final Context mContext;
+
+    public ShareIllust(Context context, Illust illustsBean) {
+        mContext = context;
+        mIllust = illustsBean;
+    }
+
+    @Override
+    public void execute() {
+        onPrepare();
+        share();
+    }
+
+    private void share() {
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TEXT,
+                mContext.getString(R.string.share_illust,
+                        mIllust.getTitle(),
+                        mIllust.getUser().getName(),
+                        URL_Head + mIllust.getId()));
+        mContext.startActivity(Intent.createChooser(intent, mContext.getString(R.string.share)));
+    }
+}

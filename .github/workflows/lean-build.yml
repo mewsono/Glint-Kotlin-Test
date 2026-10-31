@@ -1,0 +1,78 @@
+name: lean-apk
+
+# Builds the de-bloated `lean` tree on a machine that actually has the Android toolchain
+# (this sandbox has neither a JDK nor an Android SDK, and Google Maven is firewalled).
+on:
+  push:
+    branches:
+      - 'arena/c7bd0426-glint-kotlin-test'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lean-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install platform / build-tools / ndk / cmake
+        run: |
+          set -x
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.0.12077973"
+          yes | sdkmanager --licenses > /dev/null || true
+
+      - name: local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
+          restore-keys: gradle-
+
+      # The whole point of the run: real compiler diagnostics. `--no-daemon` keeps the
+      # 4 GB heap from gradle.properties in one process; `--stacktrace` surfaces the
+      # data-binding / kapt errors that otherwise show up as an empty "Execution failed".
+      - name: assembleGithubDebug
+        run: ./gradlew :app:assembleGithubDebug --no-daemon --stacktrace
+
+      - name: APK size + payload check
+        if: success()
+        run: |
+          Z=$(find app/build/outputs -name '*.apk' | head -1)
+          ls -lh "$Z"
+          unzip -l "$Z" | grep -E 'libonnxruntime|ncnn|assets/models' && {
+            echo "::error::ML payload is still in the APK"; exit 1; } || echo "no ML payload"
+          unzip -l "$Z" | tail -1
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-github-debug
+          path: app/build/outputs/apk/github/debug/*.apk
+          if-no-files-found: error

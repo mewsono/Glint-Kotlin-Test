@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingHorizontal="12dp"
+    android:paddingBottom="18dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:letterSpacing="0.12"
+        android:text="@string/v3_label_tags"
+        android:textAllCaps="true"
+        android:textColor="@color/v3_text_3"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <ceui.pixiv.widgets.V3TagFlowView
+        android:id="@+id/tags_flow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:flexWrap="wrap" />
+
+    <!-- 同义词词典「标签匹配关系」框（issue #904），词典为空时自动 GONE。
+         view 自带 12dp 横向 padding，与父布局 paddingHorizontal 叠加会双倍缩进，用负 margin 抵消 -->
+    <ceui.pixiv.ui.synonym.SynonymMatchView
+        android:id="@+id/synonym_match"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="-12dp"
+        android:layout_marginEnd="-12dp"
+        android:layout_marginTop="10dp" />
+</LinearLayout>

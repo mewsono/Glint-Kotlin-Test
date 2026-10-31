@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  作者其他作品横向条。关键:横向 RecyclerView 全出血(match_parent、外层容器不加横向 padding)+ 自带
+  12dp 内边距 + clipToPadding=false。静止时首/尾卡完整停在 12dp 内容边距处(与标题对齐、不被裁切),
+  滑动中卡片画进 padding 区域贴满整个屏幕宽。padding 必须挂在 RV 自身而非外层容器,否则滑动时会被
+  容器边界裁掉。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingBottom="18dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp">
+
+        <TextView
+            android:id="@+id/author_works_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:letterSpacing="0.12"
+            android:textAllCaps="true"
+            android:textColor="@color/v3_text_3"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            tools:text="ARTIST'S WORKS" />
+
+        <TextView
+            android:id="@+id/author_works_see_all"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/see_more"
+            android:textColor="@color/v3_ambient_primary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 加载态骨架图:一排正方形封面块,边长/间距/内边距与下面的 RV 逐项对齐 -->
+    <ceui.pixiv.ui.detail.SectionAuthorWorksSkeletonView
+        android:id="@+id/author_works_loading"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/author_works_rv"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:nestedScrollingEnabled="false"
+        android:overScrollMode="never"
+        android:paddingHorizontal="12dp" />
+</LinearLayout>

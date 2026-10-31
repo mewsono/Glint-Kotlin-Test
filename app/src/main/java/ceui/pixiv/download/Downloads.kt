@@ -1,0 +1,271 @@
+package ceui.pixiv.download
+
+import ceui.pixiv.download.backend.StorageBackend
+import ceui.pixiv.download.config.DownloadConfig
+import ceui.pixiv.download.config.OverwritePolicy
+import ceui.pixiv.download.config.ResolvedBucket
+import ceui.pixiv.download.config.StorageChoice
+import ceui.pixiv.download.model.Bucket
+import ceui.pixiv.download.model.DownloadItem
+import ceui.pixiv.download.model.RelativePath
+import ceui.pixiv.download.sanitize.FsSanitizer
+import ceui.pixiv.download.template.DefaultTemplates
+import ceui.pixiv.download.template.SafeTemplateRender
+
+/**
+ * Facade — the only entrypoint the rest of the app uses to convert a
+ * [DownloadItem] into a ready-to-write handle.
+ *
+ * Guarantees:
+ *   1. Exactly one sanitization pass ([FsSanitizer]) runs between template
+ *      rendering and storage, so any filesystem-illegal character that sneaks
+ *      in through variable values is scrubbed here — no caller can bypass it.
+ *   2. Templates are compiled lazily per template source and cached.
+ *   3. Backends are resolved via the [backendFactory] using the
+ *      [StorageChoice] in [DownloadConfig]; the factory should cache its own
+ *      instances if appropriate.
+ *   4. [OverwritePolicy] is enforced at the facade. For [OverwritePolicy.Replace],
+ *      the facade delegates to [StorageBackend.replace] so each backend can
+ *      handle replacement in a platform-friendly way (e.g. MediaStore updates
+ *      in place instead of delete + insert).
+ *   5. [Bucket.TempCache] is not user-configurable — it always uses
+ *      [StorageChoice.AppCache] with a fixed template and Replace policy. This
+ *      keeps intermediate artefacts (ugoira zip, unpacked frames) out of the
+ *      user's gallery regardless of settings.
+ *
+ * Threading: [plan] and [open] perform I/O (exists / delete checks) and MUST
+ * NOT be called from the main thread.
+ */
+class Downloads(
+    private val configProvider: () -> DownloadConfig,
+    private val backendFactory: (StorageChoice) -> StorageBackend,
+) {
+
+    constructor(
+        config: DownloadConfig,
+        backendFactory: (StorageChoice) -> StorageBackend,
+    ) : this({ config }, backendFactory)
+
+    fun plan(item: DownloadItem): Plan {
+        return plan(item, filenameSuffix = null)
+    }
+
+    /**
+     * Plan a rendered derivative beside [item]'s normal download. The active bucket template
+     * still owns the full directory and base filename; [filenameSuffix] is inserted immediately
+     * before the extension so the derivative cannot overwrite the original artwork.
+     */
+    fun planDerived(item: DownloadItem, filenameSuffix: String): Plan {
+        require(filenameSuffix.isNotBlank()) { "filenameSuffix must not be blank" }
+        return plan(item, filenameSuffix)
+    }
+
+    private fun plan(item: DownloadItem, filenameSuffix: String?): Plan {
+        val resolved: ResolvedBucket = resolveBucket(item.bucket)
+
+        // Resilient render: a malformed persisted template must not crash the
+        // download (the legacy DownloadItem constructor renders eagerly via
+        // resolvePath on the main thread, before any caller can catch). On
+        // failure SafeTemplateRender falls back to the bucket default.
+        val raw: RelativePath = SafeTemplateRender.render(
+            resolved.template, item.bucket, item.meta, item.ext, configProvider().pageNumbering,
+        )
+        val cleaned: RelativePath = FsSanitizer.clean(raw).withFilenameSuffix(filenameSuffix)
+        val backend: StorageBackend = backendFactory(resolved.storage)
+        val (finalPath, skip) = applyOverwritePolicy(cleaned, backend, resolved.overwrite, item.mime)
+        return Plan(item, finalPath, backend, resolved.overwrite, skip)
+    }
+
+    /**
+     * Render + sanitize only — no overwrite-policy probing, no backend I/O,
+     * safe on the main thread. For callers that need an item's canonical
+     * path/name (DB keys, UI labels, record lookups) without deciding a
+     * download. The actual on-disk name may still differ where the policy
+     * says so (Rename suffixes, SAF provider auto-rename) — that decision
+     * belongs to [plan] at download time, on a worker thread.
+     */
+    fun resolvePath(item: DownloadItem): RelativePath {
+        val resolved: ResolvedBucket = resolveBucket(item.bucket)
+        val raw: RelativePath = SafeTemplateRender.render(
+            resolved.template, item.bucket, item.meta, item.ext, configProvider().pageNumbering,
+        )
+        return FsSanitizer.clean(raw)
+    }
+
+    /**
+     * Whether a file already sits at [item]'s canonical path. Pure existence
+     * probe — never creates anything (unlike the Skip branch of [plan], whose
+     * SAF fast path probes via createFile). Blocking I/O — worker thread only.
+     */
+    fun existsAt(item: DownloadItem): Boolean {
+        val resolved: ResolvedBucket = resolveBucket(item.bucket)
+        return backendFactory(resolved.storage).exists(resolvePath(item))
+    }
+
+    /**
+     * Opens a write handle for [item]. Returns `null` when the resolved plan
+     * says to skip (Skip policy + file already exists).
+     */
+    fun open(item: DownloadItem): StorageBackend.WriteHandle? {
+        val plan = plan(item)
+        if (plan.skip) return null
+        return plan.open()
+    }
+
+    /** [open] counterpart for a template-derived sibling file; see [planDerived]. */
+    fun openDerived(item: DownloadItem, filenameSuffix: String): StorageBackend.WriteHandle? {
+        val plan = planDerived(item, filenameSuffix)
+        if (plan.skip) return null
+        return plan.open()
+    }
+
+    /**
+     * Bucket-scoped raw write — for callers that already have a final relative
+     * path and just want the facade's backend dispatch + sanitization. Still
+     * runs [FsSanitizer] and [OverwritePolicy], so the same filesystem
+     * guarantees hold.
+     *
+     * Intended for legacy entry points (novel export, backup, log) that
+     * bypass template rendering. New code should prefer [plan] / [open] via a
+     * typed [DownloadItem].
+     */
+    fun openRaw(
+        bucket: Bucket,
+        rawPath: RelativePath,
+        mime: String,
+        overwrite: OverwritePolicy? = null,
+    ): StorageBackend.WriteHandle? {
+        require(bucket != Bucket.TempCache) { "openRaw is not intended for TempCache" }
+        val resolved = configProvider().resolve(bucket)
+        val cleaned = FsSanitizer.clean(rawPath)
+        val backend = backendFactory(resolved.storage)
+        val policy = overwrite ?: resolved.overwrite
+        val (finalPath, skip) = applyOverwritePolicy(cleaned, backend, policy, mime)
+        if (skip) return null
+        // 用 policy 而不是 resolved.overwrite：调用方显式传了 Replace 时，前面的
+        // applyOverwritePolicy 已经按「原地覆盖」放行（不改名、不跳过），这里若还按用户的
+        // 全局策略走 open()，同名文件就会被后端自动改名成 "xxx (1).txt" —— 强制覆盖失效。
+        return if (policy == OverwritePolicy.Replace) {
+            backend.replace(finalPath, mime)
+        } else {
+            backend.open(finalPath, mime)
+        }
+    }
+
+    private fun resolveBucket(bucket: Bucket): ResolvedBucket =
+        if (bucket == Bucket.TempCache) TEMP_CACHE_FIXED else configProvider().resolve(bucket)
+
+    private fun applyOverwritePolicy(
+        path: RelativePath,
+        backend: StorageBackend,
+        policy: OverwritePolicy,
+        mime: String,
+    ): Pair<RelativePath, Boolean> = when (policy) {
+        OverwritePolicy.Skip    -> path to backend.skipIfExists(path, mime)
+        OverwritePolicy.Replace -> {
+            // Don't delete here — backend.replace() handles it in a
+            // platform-friendly way (e.g. MediaStore updates in place
+            // instead of delete + insert to avoid deletion alerts).
+            path to false
+        }
+        OverwritePolicy.Rename  -> {
+            // SAF模式下交由提供者（DocumentFile.createFile 会自动加  (X) 后缀）处理。缺陷为不能Toast不是自动重名的文件夹名称
+            // 理论createFile后可以拿到自动重命名后的文件
+            (if (backend.autoRenamesOnConflict) path else nextFreePath(path, backend)) to false
+        }
+    }
+
+    private fun RelativePath.withFilenameSuffix(suffix: String?): RelativePath {
+        if (suffix == null) return this
+        val dot = filename.lastIndexOf('.')
+        val hasExtension = dot in 1 until filename.length - 1
+        val stem = if (hasExtension) filename.substring(0, dot) else filename
+        val safeSuffix = FsSanitizer.cleanSegment(suffix)
+        val suffixBytes = safeSuffix.toByteArray(Charsets.UTF_8).size
+        require(suffixBytes < FsSanitizer.MAX_SEGMENT_BYTES - 1) {
+            "filenameSuffix is too long"
+        }
+
+        // The template result has already been capped to MAX_SEGMENT_BYTES. Appending and then
+        // sanitizing again would truncate from the end of the stem, silently dropping the suffix
+        // for long titles. Reserve its bytes explicitly so a derivative can never collapse back
+        // onto the original filename (and overwrite the artwork under Replace policy).
+        val maxExtensionBytes = FsSanitizer.MAX_SEGMENT_BYTES - suffixBytes - 1
+        val extension = (if (hasExtension) filename.substring(dot) else "")
+            .truncateUtf8(maxExtensionBytes)
+            .takeUnless { it == "." }
+            .orEmpty()
+        val stemBytes = FsSanitizer.MAX_SEGMENT_BYTES - suffixBytes -
+            extension.toByteArray(Charsets.UTF_8).size
+        val derivedStem = stem.truncateUtf8(stemBytes).ifEmpty { FsSanitizer.FALLBACK_SEGMENT }
+        val derivedName = "$derivedStem$safeSuffix$extension"
+        return RelativePath(directory + derivedName)
+    }
+
+    private fun String.truncateUtf8(maxBytes: Int): String {
+        if (toByteArray(Charsets.UTF_8).size <= maxBytes) return this
+        val result = StringBuilder()
+        var used = 0
+        var index = 0
+        while (index < length) {
+            val codePoint = codePointAt(index)
+            val token = String(Character.toChars(codePoint))
+            val tokenBytes = token.toByteArray(Charsets.UTF_8).size
+            if (used + tokenBytes > maxBytes) break
+            result.append(token)
+            used += tokenBytes
+            index += Character.charCount(codePoint)
+        }
+        return result.toString()
+    }
+
+    /**
+     * Produces `name (1).ext`, `name (2).ext`, ... until [backend] reports the
+     * segment does not exist. Extension-aware so the counter stays before the
+     * dot.
+     */
+    private fun nextFreePath(path: RelativePath, backend: StorageBackend): RelativePath {
+        if (!backend.exists(path)) return path
+        val filename = path.filename
+        val dot = filename.lastIndexOf('.')
+        val hasExt = dot in 1 until filename.length
+        val stem = if (hasExt) filename.substring(0, dot) else filename
+        val ext = if (hasExt) filename.substring(dot) else ""
+        var i = 1
+        while (i <= MAX_RENAME_ATTEMPTS) {
+            val candidate = RelativePath(path.directory + "$stem ($i)$ext")
+            if (!backend.exists(candidate)) return candidate
+            i++
+        }
+        // Backend keeps reporting "exists" — broken tree, stuck cursor, etc.
+        // Bail with a unique-ish suffix so the caller still gets *some* path
+        // instead of looping forever.
+        return RelativePath(path.directory + "$stem (${System.currentTimeMillis()})$ext")
+    }
+
+    data class Plan(
+        val item: DownloadItem,
+        val path: RelativePath,
+        val backend: StorageBackend,
+        val overwrite: OverwritePolicy,
+        val skip: Boolean,
+    ) {
+        fun open(): StorageBackend.WriteHandle {
+            check(!skip) { "Plan for ${path.joinTo()} is marked skip — do not open" }
+            return if (overwrite == OverwritePolicy.Replace) {
+                backend.replace(path, item.mime)
+            } else {
+                backend.open(path, item.mime)
+            }
+        }
+    }
+
+    companion object {
+        private const val MAX_RENAME_ATTEMPTS = 9999
+        private val TEMP_CACHE_FIXED = ResolvedBucket(
+            template  = DefaultTemplates.TEMP,
+            storage   = StorageChoice.AppCache,
+            overwrite = OverwritePolicy.Replace,
+        )
+    }
+}

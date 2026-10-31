@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="empty_list_1">Burası boş</string>
+    <string name="list_load_failed_tap_retry">Yüklenemedi. Yeniden denemek için dokunun.</string>
+    <string name="feed_error_tap_retry">Yeniden denemek için dokunun</string>
+    <string name="feed_state_go_network_test">Ağ testini çalıştır</string>
+    <string name="feed_append_paused_tap_to_continue">Daha fazla yüklemek için dokunun</string>
+</resources>

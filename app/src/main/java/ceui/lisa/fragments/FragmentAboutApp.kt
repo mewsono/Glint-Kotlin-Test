@@ -1,0 +1,267 @@
+package ceui.lisa.fragments
+
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.view.View
+import androidx.core.graphics.ColorUtils
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import ceui.lisa.BuildConfig
+import ceui.lisa.helper.WebLinkHelper
+import ceui.lisa.R
+import ceui.lisa.activities.TemplateActivity
+import ceui.lisa.databinding.FragmentAboutBinding
+import ceui.lisa.update.AppUpdateChecker
+import ceui.lisa.update.GitHubRelease
+import ceui.lisa.update.UpdateBottomSheet
+import ceui.lisa.utils.Common
+import ceui.lisa.utils.PackageUtils
+import ceui.lisa.utils.Params
+import ceui.pixiv.witstudio.theme.V3Palette
+import ceui.pixiv.witstudio.dialog.WitDialog.MenuDialogBuilder
+import ceui.pixiv.witstudio.theme.WitRowStyle
+import ceui.pixiv.ui.navigation.TemplateRoute
+
+class FragmentAboutApp : BaseLazyFragment<FragmentAboutBinding>() {
+
+    private var updateJob: Job? = null
+
+    override fun initLayout() {
+        mLayoutID = R.layout.fragment_about
+    }
+
+
+    override fun initData() {
+        baseBind.toolbar.setNavigationOnClickListener { mActivity.finish() }
+
+        baseBind.appVersion.text = "%s (%s) "
+            .format(Common.getAppVersionName(mContext), Common.getAppVersionCode(mContext))
+
+        if (BuildConfig.IS_LITE) {
+            // lite 版没有更新/版本历史两行，版本行独立成单行圆角卡
+            baseBind.versionRela.setBackgroundResource(WitRowStyle.rowBackground(0, 1))
+        }
+        val palette = V3Palette.from(mContext)
+        val iconCircle = ColorUtils.blendARGB(
+            palette.cardFill, palette.primary, if (palette.isDark) 0.16f else 0.14f
+        )
+        (baseBind.githubIconWrap.background.mutate() as? GradientDrawable)?.setColor(iconCircle)
+        SettingsCatalog.applyThemedRowBg(baseBind.parentLinear)
+
+        if (!BuildConfig.IS_LITE) {
+            baseBind.githubUpdateSection.visibility = View.VISIBLE
+            baseBind.checkUpdate.setOnClickListener {
+                performUpdateCheck(manual = true)
+            }
+            if (BuildConfig.DEBUG) {
+                // 调试用：长按不看版本号、不看「跳过此版本」，直接把这版 release 的
+                // sheet 弹出来，用来把「下载 → 断点 → 完成 → banner → 安装」整条链路
+                // 在「已经是最新版」的机器上也能走完。
+                baseBind.checkUpdate.setOnLongClickListener {
+                    forceShowUpdateSheet()
+                    true
+                }
+            }
+            baseBind.versionHistory.setOnClickListener {
+                val intent = Intent(mContext, TemplateActivity::class.java)
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.VERSION_HISTORY.key)
+                startActivity(intent)
+            }
+        } else {
+            baseBind.githubUpdateSection.visibility = View.GONE
+        }
+
+        // Auto-check for github builds
+        if (AppUpdateChecker.shouldAutoCheck()) {
+            performUpdateCheck(manual = false)
+        }
+
+        run {
+            baseBind.faq.setOnClickListener {
+                val intent = Intent(mContext, TemplateActivity::class.java)
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.MARKDOWN.key)
+                intent.putExtra(Params.URL, "FAQ.md")
+                startActivity(intent)
+            }
+
+            baseBind.rateThisApp.setOnClickListener {
+                try {
+                    timber.log.Timber.d("RateThisApp clicked, showing RateAppDialog")
+                    ceui.pixiv.widgets.RateAppDialog().show(parentFragmentManager, "RateAppDialog")
+                } catch (e: Exception) {
+                    timber.log.Timber.e(e, "Failed to show RateAppDialog")
+                }
+            }
+            baseBind.applicationId.text = requireContext().applicationInfo.packageName
+            baseBind.goWeibo.setOnClickListener {
+                val weiboInstalled = PackageUtils.isSinaWeiboInstalled(context)
+                if (weiboInstalled) {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        addCategory(Intent.CATEGORY_DEFAULT)
+                        addCategory(Intent.CATEGORY_BROWSABLE)
+                        data = Uri.parse("sinaweibo://userinfo?uid=7062240999")
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (e: ActivityNotFoundException) {
+                        WebLinkHelper.openUrl(requireContext(), "https://weibo.com/u/7062240999")
+                    }
+                } else {
+                    WebLinkHelper.openUrl(requireContext(), "https://weibo.com/u/7062240999")
+                }
+            }
+            baseBind.goTelegram.setOnClickListener {
+                WebLinkHelper.openUrl(requireContext(), "https://t.me/joinchat/QBTiWBvo-jda7SEl4VgK-Q")
+            }
+            baseBind.goQq.setOnClickListener {
+                // 最新的群在最上面，旧群基本已满；新群在列表头部插一行即可
+                // 7 群起 QQ 只给新版短链，拿不到旧版 k，按群号打开群资料卡
+                val groups = listOf(
+                    getString(R.string.qq_group_8) to
+                            "mqqapi://card/show_pslcard?src_type=internal&version=1&card_type=group&source=qrcode&uin=885329323",
+                    getString(R.string.qq_group_7) to
+                            "mqqapi://card/show_pslcard?src_type=internal&version=1&card_type=group&source=qrcode&uin=996582037",
+                    getString(R.string.qq_group_6) to
+                            "mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3DtBP0SrzxprYrVMadXxJq2KouWxDrcdle",
+                    getString(R.string.qq_group_5) to
+                            "mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3DsWRT0mSWFEiNlkPRtVwK8LmHGStPK9Op",
+                    getString(R.string.string_411) to
+                            "mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3D8WwEAkjbS4yOYMtNR17TS-Wghwv8xjNK",
+                    getString(R.string.string_387) to
+                            "mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3DoDdX8b0zEBsZtZF9QNqoTmamW_hTP1By",
+                    getString(R.string.string_386) to
+                            "mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3Dt4_EApMhD08yaYtdTQ40TmrjIx-uuWsk",
+                    getString(R.string.string_385) to
+                            "mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3D_4iHqW5v5XkiRxeLKl3hB0me60VVKD9b"
+                )
+                MenuDialogBuilder(mActivity)
+                    .addItems(groups.map { it.first }.toTypedArray()) { dialog, which ->
+                        val intent = Intent()
+                        intent.data = Uri.parse(groups[which].second)
+                        try {
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            Common.showToast(getString(R.string.string_227))
+                        }
+                    }
+                    .show()
+            }
+        }
+
+        run {
+            baseBind.pixivProblem.setOnClickListener {
+                val intent = Intent(mContext, TemplateActivity::class.java)
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WEB_LINK.key)
+                intent.putExtra(Params.URL, "https://app.pixiv.help/hc/zh-cn")
+                intent.putExtra(Params.TITLE, getString(R.string.pixiv_problem))
+                startActivity(intent)
+            }
+            baseBind.pixivUseDetail.setOnClickListener {
+                val intent = Intent(mContext, TemplateActivity::class.java)
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WEB_LINK.key)
+                intent.putExtra(
+                    Params.URL,
+                    "https://www.pixiv.net/terms/?page=term&appname=pixiv_ios"
+                )
+                intent.putExtra(Params.TITLE, getString(R.string.pixiv_use_detail))
+                startActivity(intent)
+            }
+            baseBind.pixivPrivacy.setOnClickListener {
+                val intent = Intent(mContext, TemplateActivity::class.java)
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.WEB_LINK.key)
+                intent.putExtra(
+                    Params.URL,
+                    "https://www.pixiv.net/terms/?page=privacy&appname=pixiv_ios"
+                )
+                intent.putExtra(Params.TITLE, getString(R.string.privacy))
+                startActivity(intent)
+            }
+        }
+
+        run {
+            baseBind.projectWebsite.setOnClickListener {
+                WebLinkHelper.openUrl(requireContext(), "https://github.com/CeuiLiSA/Pixiv-Shaft")
+            }
+        }
+    }
+
+    private fun performUpdateCheck(manual: Boolean) {
+        baseBind.updateStatus.setText(R.string.update_checking)
+
+        updateJob?.cancel()
+        updateJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = try {
+                AppUpdateChecker.checkForUpdate()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (AppUpdateChecker.isRateLimit(e)) {
+                    val message = AppUpdateChecker.getRateLimitMessage(requireContext(), e)
+                    baseBind.updateStatus.text = message
+                    if (manual) {
+                        Common.showToast(message)
+                    }
+                } else {
+                    baseBind.updateStatus.setText(R.string.update_check_failed)
+                }
+                return@launch
+            }
+            AppUpdateChecker.markChecked()
+            when (result) {
+                is AppUpdateChecker.UpdateResult.UpdateAvailable -> {
+                    val version = result.release.tagName.removePrefix("v").removePrefix("V")
+                    baseBind.updateStatus.text = getString(R.string.update_found_new, version)
+                    if (!manual && AppUpdateChecker.isVersionSkipped(version)) {
+                        return@launch
+                    }
+                    showUpdateDialog(result.release)
+                }
+
+                is AppUpdateChecker.UpdateResult.NoUpdate -> {
+                    baseBind.updateStatus.text =
+                        getString(R.string.update_already_latest, result.remoteVersion)
+                }
+            }
+        }
+    }
+
+    private fun showUpdateDialog(release: GitHubRelease) {
+        // 已经有一个在显示了就别再叠一个（自动检查 + 手动点 / 长按可能撞在一起）。
+        if (!isAdded || childFragmentManager.findFragmentByTag("update_dialog") != null) return
+        val dialog = UpdateBottomSheet.newInstance(release)
+        dialog.show(childFragmentManager, "update_dialog")
+    }
+
+    /**
+     * 调试入口（长按「检查更新」）：不看版本比较、不看跳过记录，直接把 latest release
+     * 的 sheet 弹出来。正式构建里不会挂这个监听。
+     */
+    private fun forceShowUpdateSheet() {
+        baseBind.updateStatus.setText(R.string.update_checking)
+        updateJob?.cancel()
+        updateJob = viewLifecycleOwner.lifecycleScope.launch {
+            val release = try {
+                AppUpdateChecker.fetchLatestReleaseForTest()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val message = if (AppUpdateChecker.isRateLimit(e)) {
+                    AppUpdateChecker.getRateLimitMessage(requireContext(), e)
+                } else {
+                    getString(R.string.update_check_failed)
+                }
+                baseBind.updateStatus.text = message
+                Common.showToast(message)
+                return@launch
+            }
+            baseBind.updateStatus.text =
+                getString(R.string.update_found_new, release.tagName.removePrefix("v").removePrefix("V"))
+            showUpdateDialog(release)
+        }
+    }
+
+}

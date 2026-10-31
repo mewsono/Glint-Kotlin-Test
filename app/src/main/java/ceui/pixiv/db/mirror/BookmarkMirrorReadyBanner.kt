@@ -1,0 +1,118 @@
+package ceui.pixiv.db.mirror
+
+import android.content.Context
+import ceui.lisa.R
+import ceui.lisa.activities.Shaft
+import ceui.pixiv.banner.BannerCategory
+import ceui.pixiv.banner.BannerDisplayPolicy
+import ceui.pixiv.banner.BannerIcon
+import ceui.pixiv.banner.BannerPriority
+import ceui.pixiv.banner.BannerRequest
+import ceui.pixiv.banner.host.InAppBanners
+import timber.log.Timber
+import java.util.Locale
+
+/**
+ * 「收藏库准备好了」的一次性引导。
+ *
+ * 整个镜像过程是**刻意静默**的：用户从头到尾没被打扰过，也就完全不知道后台攒好了一份
+ * 可以倒序、可以按标签/作者/年份筛、可以全文搜的本地副本。补齐的那一刻是唯一值得说一句话
+ * 的时点 —— 在此之前说等于催促，在此之后说就永远没有由头了。
+ *
+ * **只弹一次，而且是永久性的一次**：标记落 MMKV（按书架），不是内存标志位。
+ * 进程重启、重进页面、甚至用户把镜像重建一遍，都不会再弹第二次 ——
+ * 引导只在「第一次知道有这个东西」时有价值，之后每一次都只是打扰。
+ */
+object BookmarkMirrorReadyBanner {
+
+    private const val TAG = "BookmarkMirror"
+
+    /** MMKV key 前缀。带书架键 = 插画/小说/关注、公开/悄悄各自最多一次。 */
+    private const val KEY_PREFIX = "bookmark_mirror_ready_announced_"
+
+    fun announce(context: Context, shelf: BookmarkShelf, rows: Int) {
+        val key = KEY_PREFIX + shelf.key
+        val prefs = Shaft.getMMKV() ?: return
+        if (prefs.decodeBool(key, false)) {
+            Timber.tag(TAG).d("[%s] 引导 banner 之前已经弹过，不再弹", shelf.label)
+            return
+        }
+        // **先落标记再弹**：反过来的话，enqueue 抛异常时标记就没写上，而下一次全量完成
+        // 不会再触发（firstCompletedAt 此时已落盘），这条引导反而可能永远不来。
+        // 无前台宿主时 manager 会把请求保留到下一个 STARTED 宿主，不再等于「漏一次」。
+        prefs.encode(key, true)
+
+        val isUser = shelf.contentType == MirrorContentType.USER
+        val deepLink = "shaft://bookmark-library" +
+            "?restrict=${shelf.restrict.apiValue}&type=${shelf.contentType.code}"
+        val accepted = runCatching {
+            InAppBanners.manager.enqueue(
+                BannerRequest.Text(
+                    id = "bookmark-mirror-ready-${shelf.key}",
+                    title = context.getString(
+                        if (isUser) R.string.following_mirror_ready_title else R.string.bookmark_mirror_ready_title
+                    ),
+                    message = context.getString(
+                        if (isUser) R.string.following_mirror_ready_message else R.string.bookmark_mirror_ready_message,
+                        String.format(Locale.getDefault(), "%,d", rows),
+                    ),
+                    caption = context.getString(
+                        when (shelf.contentType) {
+                            MirrorContentType.ILLUST -> R.string.bookmark_library_title
+                            MirrorContentType.NOVEL -> R.string.string_320
+                            MirrorContentType.USER -> R.string.string_321
+                        }
+                    ),
+                    // 用 app 自己的图标：这条不是某个作品/某个人发来的消息，而是**应用**
+                    // 在跟用户说话。摆一个筛选漏斗只会让人以为是某种筛选结果通知。
+                    icon = BannerIcon.Resource(R.mipmap.ic_launcher),
+                    action = ceui.pixiv.banner.BannerAction(
+                        label = context.getString(R.string.bookmark_mirror_ready_action),
+                        deepLink = deepLink,
+                    ),
+                    dedupKey = "bookmark-mirror-ready-${shelf.contentType.tag}",
+                    priority = BannerPriority.NORMAL,
+                    category = BannerCategory.System,
+                    // Enqueue 而不是 Replace：这条不该把用户正在看的（比如刚收到的私信）挤掉。
+                    policy = BannerDisplayPolicy.Enqueue,
+                    // 比默认 4 秒长一点：这是一条要读、要理解、还要决定点不点的引导。
+                    autoDismissMillis = 7000L,
+                    deepLink = deepLink,
+                )
+            )
+        }.getOrElse {
+            Timber.tag(TAG).w(it, "[%s] 引导 banner 入队失败", shelf.label)
+            false
+        }
+        Timber.tag(TAG).i("[%s] 收藏库就绪引导 banner 已受理=%b（%d 件）", shelf.label, accepted, rows)
+    }
+
+    /**
+     * 【临时·调试】重放一次引导：先把「已弹过」的一次性标记清掉，再走一遍 [announce]。
+     *
+     * 存在的唯一理由：这条引导只在整份回填**翻到最后一页**那一刻弹一次，想验它的按钮就得先等
+     * 几十分钟回填 + 各种时机对齐；而且即使等到了，那个是真正的一次性——验砸了不重启就没第二次。
+     * 这里给「设置 · 试验性」里那个手动入口用（见 `DebugMirrorBannerTrigger`）。
+     *
+     * **用完即删**：与 `fragment_settings_experimental.xml` 的 `debug_mirror_banner_rela`、
+     * `FragmentSettingsExperimental` 里的绑定、`DebugMirrorBannerTrigger.kt` 一起删。
+     */
+    fun debugReplay(context: Context, shelf: BookmarkShelf, rows: Int) {
+        Shaft.getMMKV()?.encode(KEY_PREFIX + shelf.key, false)
+        announce(context, shelf, rows)
+    }
+
+    /**
+     * 账号被从本地移除：把这个 uid 名下所有书架的「已弹过」标记清掉。
+     *
+     * 标记本身是**永久**的、按书架存的，这正是它该有的样子 —— 引导只在「第一次知道有这个
+     * 东西」时才有价值。但「用户已经知道」这件事是跟着账号走的：账号删掉、同一个 uid 以后
+     * 再登录回来，那份镜像是从零重建的，补齐那一刻理应再讲一次；不清标记的话这条引导
+     * 对这个账号就永远不来了。
+     */
+    fun forget(ownerUid: Long) {
+        if (ownerUid <= 0L) return
+        val prefs = Shaft.getMMKV() ?: return
+        BookmarkShelf.allOf(ownerUid).forEach { prefs.removeValueForKey(KEY_PREFIX + it.key) }
+    }
+}

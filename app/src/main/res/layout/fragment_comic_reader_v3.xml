@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/comic_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/comic_pager"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/comic_webtoon"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:clipToPadding="false"
+        tools:listitem="@layout/cell_comic_page" />
+
+    <View
+        android:id="@+id/comic_warm_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FFB347"
+        android:alpha="0"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <!-- 与插画一级/二级详情页的进度环样式统一(30dp/5dp 圆角 Material 环)。
+         整卷加载无字节级进度,用不确定模式;indicatorColor 在
+         applyComicLoadingTint() 里按黑/白底着色,避免白底下白环不可见。 -->
+    <ceui.lisa.view.SeamlessCircularProgressIndicator
+        android:id="@+id/comic_loading"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="visible"
+        app:indicatorColor="@color/white"
+        app:indicatorSize="30dp"
+        app:trackColor="@color/voice_record_track_color"
+        app:trackCornerRadius="4dp"
+        app:trackThickness="5dp" />
+
+    <TextView
+        android:id="@+id/comic_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:visibility="gone"
+        android:padding="20dp"
+        tools:text="加载失败" />
+
+    <TextView
+        android:id="@+id/comic_page_overlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="12dp"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:shadowColor="#B3000000"
+        android:shadowRadius="4"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="3dp"
+        android:background="@drawable/bg_comic_page_overlay" />
+
+    <include
+        android:id="@+id/comic_top_bar"
+        layout="@layout/layout_comic_reader_top_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top" />
+
+    <include
+        android:id="@+id/comic_bottom_bar"
+        layout="@layout/layout_comic_reader_bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom" />
+</FrameLayout>

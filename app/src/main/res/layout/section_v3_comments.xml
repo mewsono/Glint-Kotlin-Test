@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingBottom="18dp">
+
+    <!-- 评论行是无界平铺(edge-to-edge),所以左右边距不能挂在本区块根上,而是各自挂在
+         区块头 / 「添加评论」胶囊 / 空态上,统一 12dp 与其余区块头对齐。 -->
+
+    <!-- Header: 评论 label + 查看更多(常驻右侧,无论有没有评论都能进完整列表) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:letterSpacing="0.12"
+            android:text="@string/v3_label_comments"
+            android:textAllCaps="true"
+            android:textColor="@color/v3_text_3"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/comments_more"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/see_more"
+            android:textColor="@color/v3_ambient_primary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 「添加评论」假装是输入框的胶囊入口:平时底部不常驻输入框,点这里才唤出真正的输入栏
+         +表情/贴纸面板(见 ArtworkV3Fragment.showComposer),跟评论详情页复用同一套
+         attachBottomPanel。底色/圆角在代码里现算(CommentsVH.bind),跟输入栏本身的胶囊同款。 -->
+    <LinearLayout
+        android:id="@+id/add_comment_entry"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="14dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="@drawable/v3_ripple_card22"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="11dp">
+
+        <de.hdodenhof.circleimageview.CircleImageView
+            android:id="@+id/add_comment_avatar"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="10dp"
+            android:scaleType="centerCrop"
+            android:src="@drawable/v3_widget_avatar_placeholder" />
+
+        <TextView
+            android:id="@+id/add_comment_hint"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/string_49"
+            android:textColor="@color/v3_text_3"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <!-- 加载态骨架图:三张评论卡的卡内内容(头像 / 名字 / 时间 / 两行正文),尺寸照抄
+         cell_comment_preview,真评论到位时原地替换、不跳版。 -->
+    <ceui.pixiv.ui.detail.SectionCommentsSkeletonView
+        android:id="@+id/comments_loading"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone" />
+
+    <!-- Comments list -->
+    <LinearLayout
+        android:id="@+id/comments_list"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
+    <!-- Empty state when there are no comments yet -->
+    <TextView
+        android:id="@+id/comments_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:minHeight="160dp"
+        android:paddingStart="12dp"
+        android:paddingTop="48dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="48dp"
+        android:text="@string/v3_no_comments_yet"
+        android:textColor="@color/v3_text_3"
+        android:textSize="13sp"
+        android:visibility="gone" />
+</LinearLayout>

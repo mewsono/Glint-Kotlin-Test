@@ -1,0 +1,231 @@
+package ceui.pixiv.ui.upscale
+
+import android.content.Context
+import android.content.Intent
+import android.view.View
+import android.widget.TextView
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
+import ceui.lisa.R
+import ceui.lisa.activities.TemplateActivity
+import ceui.lisa.download.IllustDownload
+import ceui.pixiv.api.model.Illust
+import ceui.lisa.utils.Common
+import ceui.lisa.utils.Params
+import ceui.pixiv.imageloader.PageImageSourceResolver
+import ceui.pixiv.imageloader.awaitFile
+import ceui.lisa.view.SeamlessCircularProgressIndicator
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import ceui.pixiv.ui.navigation.TemplateRoute
+
+class IllustAiHelper(
+    private val fragment: Fragment,
+    private val rootView: View,
+    /**
+     * 覆盖层在详情页是 ViewStub，首帧不建（见 `ArtworkV3Fragment.ensureAiOverlay`）。
+     * 所有会碰 `ai_*` 这些 view 的入口都必须在第一行调它，把子树建出来再往下走。
+     * 默认空实现：调用方没接 ViewStub 时（经典页）行为完全不变。
+     */
+    private val ensureOverlay: () -> Unit = {},
+) {
+    /** 同一任务可能被“恢复任务”和重复点击同时接入；每个 view 生命周期只观察一次。 */
+    private var observedUpscaleTask: UpscaleTask? = null
+
+    private val context: Context get() = fragment.requireContext()
+    private val lifecycleOwner: LifecycleOwner get() = fragment.viewLifecycleOwner
+
+    private val overlayRoot: View get() = rootView.findViewById(R.id.ai_overlay_root)
+    private val loadingState: View get() = rootView.findViewById(R.id.ai_loading_state)
+    private val doneState: View get() = rootView.findViewById(R.id.ai_done_state)
+    private val viewCompare: View get() = rootView.findViewById(R.id.ai_view_compare)
+    private val dismiss: View get() = rootView.findViewById(R.id.ai_dismiss)
+    private val progressRing: SeamlessCircularProgressIndicator get() = rootView.findViewById(R.id.ai_progress_ring)
+    private val progressText: TextView get() = rootView.findViewById(R.id.ai_progress_text)
+    private val statusText: TextView get() = rootView.findViewById(R.id.ai_status_text)
+    private val etaText: TextView get() = rootView.findViewById(R.id.ai_eta_text)
+
+    fun performRembg(illust: Illust, model: RembgModel) {
+        val imageUrl = IllustDownload.getUrl(illust, 0, Params.IMAGE_RESOLUTION_ORIGINAL)
+            ?: IllustDownload.getUrl(illust, 0, Params.IMAGE_RESOLUTION_LARGE) ?: return
+
+        ensureOverlay() // 覆盖层是 ViewStub：碰 ai_* 之前先把子树建出来
+
+        overlayRoot.visibility = View.VISIBLE
+        loadingState.visibility = View.VISIBLE
+        doneState.visibility = View.GONE
+        overlayRoot.alpha = 0f
+        overlayRoot.animate().alpha(1f).setDuration(300).start()
+        statusText.text = context.getString(R.string.string_ai_rembg_running)
+        progressRing.isIndeterminate = true
+        progressText.visibility = View.GONE
+
+        // 复用详情页(IllustAdapter)已加载的原图,与显示层同一共享任务,不重新下载；
+        // 本地已下载这一页时直接用本地文件，不再走网络。
+        lifecycleOwner.lifecycleScope.launch {
+            val file = try {
+                PageImageSourceResolver.resolve(context, illust, 0, imageUrl).awaitFile(context)
+                    // url 非空时 resolve 不会给 Unavailable；真出现就按加载失败走同一个兜底。
+                    ?: error("no page image source: $imageUrl")
+            } catch (e: Exception) {
+                overlayRoot.animate().alpha(0f).setDuration(300).withEndAction {
+                    overlayRoot.visibility = View.GONE
+                }.start()
+                Common.showToast(R.string.string_ai_rembg_failed)
+                return@launch
+            }
+            val result = BackgroundRemover.removeBackground(context, file, model) { percent ->
+                rootView.post {
+                    progressRing.isIndeterminate = false
+                    progressText.visibility = View.VISIBLE
+                    val p = (percent * 100).toInt()
+                    progressRing.setProgressCompat(p, true)
+                    progressText.text = "$p%"
+                }
+            }
+            overlayRoot.animate().alpha(0f).setDuration(300).withEndAction {
+                overlayRoot.visibility = View.GONE
+            }.start()
+            if (result != null) {
+                val intent = Intent(context, TemplateActivity::class.java)
+                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.REMBG_HIGHLIGHT.key)
+                intent.putExtra("original_path", file.absolutePath)
+                intent.putExtra("rembg_path", result.absolutePath)
+                fragment.startActivity(intent)
+            } else {
+                Common.showToast(R.string.string_ai_rembg_failed)
+            }
+        }
+    }
+
+
+    fun performUpscale(illust: Illust, model: UpscaleModel = UpscaleModel.REAL_ESRGAN) {
+        val imageUrl = IllustDownload.getUrl(illust, 0, Params.IMAGE_RESOLUTION_ORIGINAL)
+            ?: IllustDownload.getUrl(illust, 0, Params.IMAGE_RESOLUTION_LARGE) ?: return
+
+        // 复用详情页(IllustAdapter)已加载的原图,与显示层同一共享任务,不重新下载；
+        // 本地已下载这一页时直接用本地文件，不再走网络。
+        lifecycleOwner.lifecycleScope.launch {
+            val file = try {
+                PageImageSourceResolver.resolve(context, illust, 0, imageUrl).awaitFile(context)
+                    // url 非空时 resolve 不会给 Unavailable；真出现就按加载失败走同一个兜底。
+                    ?: error("no page image source: $imageUrl")
+            } catch (e: CancellationException) {
+                // 等图期间离开页面:重抛,别把「取消」当成加载失败弹 toast
+                throw e
+            } catch (e: Exception) {
+                // 以前这里静默 return，点了「超分」什么都不发生，用户看不出是失败了。
+                Common.showToast(R.string.string_ai_upscale_failed)
+                return@launch
+            }
+            val key = UpscaleTask.illustKey(illust.id)
+            val task = UpscaleTaskPool.startTask(key, context, file, file.absolutePath, model)
+            observeUpscaleTask(task)
+        }
+    }
+
+    fun restoreUpscaleIfRunning(illustId: Long) {
+        val key = UpscaleTask.illustKey(illustId)
+        val task = UpscaleTaskPool.getTask(key) ?: return
+        when (task.status.value) {
+            UpscaleStatus.Running, UpscaleStatus.Done -> observeUpscaleTask(task)
+            UpscaleStatus.Failed -> {
+                Common.showToast(R.string.string_ai_upscale_failed)
+                removeTaskIfCurrent(task)
+            }
+            else -> {}
+        }
+    }
+
+    private fun observeUpscaleTask(task: UpscaleTask) {
+        if (observedUpscaleTask === task) return
+        observedUpscaleTask = task
+        // 覆盖层是 ViewStub：走到这一步才真的要用（新建 / 恢复的任务），此时才建子树。
+        // performUpscale 也收敛到这里，所以只需在这一处接。
+        ensureOverlay()
+
+        fun navigateToCompare(): Boolean {
+            val result = task.resultFile.value ?: return false
+            val intent = Intent(context, TemplateActivity::class.java)
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.UPSCALE_COMPARE.key)
+            intent.putExtra("upscaled_path", result.absolutePath)
+            intent.putExtra("original_path", task.originalFilePath)
+            fragment.startActivity(intent)
+            return true
+        }
+
+        fun showDoneState() {
+            loadingState.visibility = View.GONE
+            doneState.visibility = View.VISIBLE
+            overlayRoot.visibility = View.VISIBLE
+            overlayRoot.alpha = 1f
+        }
+
+        viewCompare.setOnClickListener {
+            if (navigateToCompare()) {
+                overlayRoot.visibility = View.GONE
+                removeTaskIfCurrent(task)
+            }
+        }
+        dismiss.setOnClickListener {
+            overlayRoot.animate().alpha(0f).setDuration(300).withEndAction {
+                overlayRoot.visibility = View.GONE
+            }.start()
+            removeTaskIfCurrent(task)
+        }
+
+        task.status.observe(lifecycleOwner) { status ->
+            when (status) {
+                UpscaleStatus.Running -> {
+                    overlayRoot.visibility = View.VISIBLE
+                    loadingState.visibility = View.VISIBLE
+                    doneState.visibility = View.GONE
+                    if (overlayRoot.alpha < 1f) {
+                        overlayRoot.alpha = 0f
+                        overlayRoot.animate().alpha(1f).setDuration(300).start()
+                    }
+                    statusText.text = context.getString(R.string.string_ai_upscale_running, task.model.displayName)
+                }
+                UpscaleStatus.Done -> {
+                    if (fragment.isResumed && navigateToCompare()) {
+                        overlayRoot.animate().alpha(0f).setDuration(300).withEndAction {
+                            overlayRoot.visibility = View.GONE
+                        }.start()
+                        // 自动打开对比页后任务已完成使命。若留在池里，返回详情再旋转会把 Done
+                        // 任务恢复出来并二次跳转，同时结果文件引用也会被进程长期持有。
+                        removeTaskIfCurrent(task)
+                    } else {
+                        showDoneState()
+                    }
+                }
+                UpscaleStatus.Failed -> {
+                    overlayRoot.animate().alpha(0f).setDuration(300).withEndAction {
+                        overlayRoot.visibility = View.GONE
+                    }.start()
+                    Common.showToast(R.string.string_ai_upscale_failed)
+                    removeTaskIfCurrent(task)
+                }
+                else -> {}
+            }
+        }
+        task.progress.observe(lifecycleOwner) { percent ->
+            val p = (percent * 100).toInt()
+            progressRing.setProgressCompat(p, true)
+            progressText.text = "$p%"
+        }
+        task.eta.observe(lifecycleOwner) { eta ->
+            etaText.text = if (eta > 0) "预计 ${String.format("%.0f", eta)} 秒后完成" else ""
+        }
+    }
+
+    /** 旧页面的终态回调不能误删同 key 下已经由别处启动的新任务。 */
+    private fun removeTaskIfCurrent(task: UpscaleTask) {
+        if (UpscaleTaskPool.getTask(task.taskKey) === task) {
+            UpscaleTaskPool.removeTask(task.taskKey)
+        }
+        if (observedUpscaleTask === task) {
+            observedUpscaleTask = null
+        }
+    }
+}

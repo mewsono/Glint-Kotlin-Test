@@ -1,0 +1,318 @@
+package ceui.pixiv.download.config
+
+import ceui.pixiv.download.model.Bucket
+import ceui.pixiv.download.template.DefaultTemplates
+
+/**
+ * Pre-baked full-configuration presets the user can one-click apply.
+ * Prototype pattern — each preset is a fully-cloneable starting point.
+ *
+ * Each preset is responsible for its own per-bucket map; presets do NOT
+ * inherit from each other so the end state of "apply preset X" is
+ * deterministic and does not depend on what was there before.
+ *
+ * 每套预设都同时给 [Bucket.NovelSeries]（合并下载的合集文件）配一条模板，目录
+ * 跟着该预设的小说目录走、文件名统一带系列名 + 章节数；不配的话合集会掉回
+ * [DefaultTemplates.NOVEL_SERIES]，和预设的其余部分对不上。
+ *
+ * 预设覆盖面：
+ * - [shaftClassic] — 与 4.5.7 及之前版本字节级一致（插画/动图），旧数据零迁移识别。
+ * - [modern] — 新的 `Shaft/Illusts/{author} ({author_id})/` 结构，R18/AI 嵌套子目录。
+ * - [flat] — 一个根目录全摊开，不区分 R18/AI/作者。
+ * - [byDate] — 按年/月分组。
+ * - [byAuthor] — 按作者分组，不按 R18/AI 分。
+ * - [byAuthorAndDate] — 作者 + 年月双层分组。
+ * - [bySeries] — 小说按系列分组，图按作者分组。
+ * - [minimal] — 仅用 ID，最短路径，适合文件管理器手动管理。
+ * - [rFilter] — 强制 R18/AI 子目录；内部再按作者分。
+ * - [detailed] — 标题+ID+P+画师ID+画师昵称+尺寸+时间，信息量最大。
+ */
+object ConfigPresets {
+
+    /** 4.5.7 及之前的默认路径，重新下载时可匹配旧文件。 */
+    fun shaftClassic(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = DefaultTemplates.ILLUST,
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(template = DefaultTemplates.UGOIRA, storage = imagesStorage),
+                Bucket.Novel  to BucketConfig(template = DefaultTemplates.NOVEL,  storage = downloadsStorage),
+                Bucket.NovelSeries to BucketConfig(template = DefaultTemplates.NOVEL_SERIES, storage = downloadsStorage),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /** 下载重构后一直到 4.5.8 版本的风格（按作者分 + R18/AI 嵌套目录）。 */
+    fun modern(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/Illusts/[?R18:R18/][?AI:AI/]{author} ({author_id})/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/Ugoira/{author} ({author_id})/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/Novels/{author} ({author_id})/{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/Novels/{author} ({author_id})/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    fun flat(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(template = "Shaft/{title} {id}.gif", storage = imagesStorage),
+                Bucket.Novel  to BucketConfig(template = "Shaft/{title} {id}.txt", storage = downloadsStorage),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP,  storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,     storage = downloadsStorage),
+            ),
+        )
+
+    fun byDate(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{created:yyyy}/{created:yyyy-MM}/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/{created:yyyy}/{created:yyyy-MM}/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/Novels/{created:yyyy}/{created:yyyy-MM}/{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/Novels/{created:yyyy}/{created:yyyy-MM}/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    fun byAuthor(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{author} ({author_id})/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /** 作者 + 年月双层，兼顾「按人找」和「按时间找」。 */
+    fun byAuthorAndDate(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{author} ({author_id})/{created:yyyy-MM}/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{created:yyyy-MM}/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/Novels/{author} ({author_id})/{created:yyyy-MM}/{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/Novels/{author} ({author_id})/{created:yyyy-MM}/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /** 多P单独建子文件夹，单P直接放作者目录下；兼顾整洁和浏览便利。 */
+    fun byAuthorMultiPageGroup(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{author} ({author_id})/[?p>1:{title} {id}/]{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /**
+     * 小说按「系列/序号 标题」落盘（issue #964），系列层上面不套作者层；
+     * 图和动图保持按作者分组。序号拿不到时（如单篇下载）渲染为空，
+     * 前导空格会被 FsSanitizer 裁掉，不会留下孤立分隔符。
+     */
+    fun bySeries(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{author} ({author_id})/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/{author} ({author_id})/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/Novels/[?series:{series}/{series_order} ]{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/Novels/{series}/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /** 最短路径——只保留 ID + 扩展名，路径由存储卷自己决定。 */
+    fun minimal(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/{id}[?p>1:_p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(template = "Shaft/{id}.gif", storage = imagesStorage),
+                Bucket.Novel  to BucketConfig(template = "Shaft/{id}.txt", storage = downloadsStorage),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/{id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /** 详细命名——标题+ID+P+画师ID+画师昵称+尺寸+时间，信息量最大。 */
+    fun detailed(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "ShaftImages/{title}_{id}_p{page}_{author_id}_{author}_{w}px_{h}px_{created:yyyyMMdd_HHmmss}.{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "ShaftImages/{title}_{id}_{author_id}_{author}_{created:yyyyMMdd_HHmmss}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "ShaftNovels/{title}_{id}_{author_id}_{author}_{created:yyyyMMdd_HHmmss}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/Novels/{series}_合集_{id}_{chapters}章_{author_id}_{author}_{created:yyyyMMdd_HHmmss}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    /** R18 / AI 强制分桶，内部按作者分；适合整理时想「一眼避开 R18」的场景。 */
+    fun rFilter(imagesStorage: StorageChoice, downloadsStorage: StorageChoice): DownloadConfig =
+        DownloadConfig(
+            defaults = BucketDefaults(
+                template = "Shaft/[?R18:R18][?!R18:SFW]/[?AI:AI/][?!AI:Human/]{author} ({author_id})/{title} {id}[?p>1: p{page}].{ext}",
+                storage  = imagesStorage,
+            ),
+            perBucket = mapOf(
+                Bucket.Ugoira to BucketConfig(
+                    template = "Shaft/[?R18:R18][?!R18:SFW]/[?AI:AI/][?!AI:Human/]{author} ({author_id})/{title} {id}.gif",
+                    storage  = imagesStorage,
+                ),
+                Bucket.Novel  to BucketConfig(
+                    template = "Shaft/Novels/[?R18:R18][?!R18:SFW]/{author} ({author_id})/{title} {id}.txt",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.NovelSeries to BucketConfig(
+                    template = "Shaft/Novels/[?R18:R18][?!R18:SFW]/{author} ({author_id})/{series} 合集 1~{chapters} {id}.{ext}",
+                    storage  = downloadsStorage,
+                ),
+                Bucket.Backup to BucketConfig(template = DefaultTemplates.BACKUP, storage = downloadsStorage),
+                Bucket.Log    to BucketConfig(template = DefaultTemplates.LOG,    storage = downloadsStorage),
+            ),
+        )
+
+    enum class Id {
+        ShaftClassic,
+        Modern,
+        Flat,
+        ByDate,
+        ByAuthor,
+        ByAuthorAndDate,
+        ByAuthorMultiPageGroup,
+        BySeries,
+        Minimal,
+        RFilter,
+        Detailed,
+    }
+
+    fun of(
+        id: Id,
+        imagesStorage: StorageChoice,
+        downloadsStorage: StorageChoice,
+    ): DownloadConfig = when (id) {
+        Id.ShaftClassic            -> shaftClassic(imagesStorage, downloadsStorage)
+        Id.Modern                  -> modern(imagesStorage, downloadsStorage)
+        Id.Flat                    -> flat(imagesStorage, downloadsStorage)
+        Id.ByDate                  -> byDate(imagesStorage, downloadsStorage)
+        Id.ByAuthor                -> byAuthor(imagesStorage, downloadsStorage)
+        Id.ByAuthorAndDate         -> byAuthorAndDate(imagesStorage, downloadsStorage)
+        Id.ByAuthorMultiPageGroup  -> byAuthorMultiPageGroup(imagesStorage, downloadsStorage)
+        Id.BySeries                -> bySeries(imagesStorage, downloadsStorage)
+        Id.Minimal                 -> minimal(imagesStorage, downloadsStorage)
+        Id.RFilter                 -> rFilter(imagesStorage, downloadsStorage)
+        Id.Detailed                -> detailed(imagesStorage, downloadsStorage)
+    }
+}

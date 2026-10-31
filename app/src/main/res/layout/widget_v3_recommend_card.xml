@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/widget_cover"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/v3_widget_card_bg"
+        android:contentDescription="@null"
+        android:scaleType="fitXY" />
+
+    <!-- 默认可见（首次渲染前显示加载文案），renderIllust 成功后置 GONE -->
+    <TextView
+        android:id="@+id/widget_message"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:padding="12dp"
+        android:text="@string/v3_widget_loading_title"
+        android:textColor="@color/v3_text_2"
+        android:textSize="12sp" />
+
+    <ImageView
+        android:id="@+id/widget_bookmark"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="8dp"
+        android:background="@drawable/v3_widget_refresh_scrim"
+        android:contentDescription="@null"
+        android:padding="7dp"
+        android:src="@drawable/ic_widget_heart"
+        app:tint="#E6FFFFFF"
+        android:visibility="gone" />
+
+    <ImageView
+        android:id="@+id/widget_refresh"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="8dp"
+        android:background="@drawable/v3_widget_refresh_scrim"
+        android:contentDescription="@null"
+        android:padding="6dp"
+        android:src="@drawable/ic_baseline_refresh_48"
+        app:tint="#E6FFFFFF" />
+</FrameLayout>

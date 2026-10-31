@@ -1,0 +1,169 @@
+package ceui.pixiv.ui.dynamic
+
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import androidx.fragment.app.viewModels
+import ceui.lisa.R
+import ceui.lisa.activities.Shaft
+import ceui.lisa.helper.IllustNovelFilter
+import ceui.lisa.databinding.FragmentToolbarFeedBinding
+import ceui.lisa.utils.Params
+import ceui.pixiv.witstudio.theme.V3Palette
+import ceui.pixiv.api.Client
+import ceui.loxia.Novel
+import ceui.pixiv.feeds.FeedItem
+import ceui.pixiv.feeds.pixiv.pixivFeedSource
+import ceui.pixiv.feeds.feedViewModels
+import ceui.pixiv.ui.common.NovelFeedFragment
+import ceui.pixiv.ui.common.NovelFeedItem
+import ceui.pixiv.ui.common.observeR18FilterChanges
+import ceui.pixiv.ui.common.setUpToolbar
+
+/**
+ * 「关注画师的最新小说」列表（feeds 框架版，替代 legacy FragmentNewNovels + NewNovelRepo）。
+ * 卡片 / 收藏同步 / 详情跳转 / 首屏骨架图全部复用基类 [NovelFeedFragment] 的主力小说卡（recy_novel）。
+ *
+ * 两种形态，对齐 legacy：
+ * - **内嵌**（[ceui.lisa.fragments.FragmentRight] 的小说模式，showToolbar=false）：宿主自己有头，
+ *   不能再带 toolbar（legacy 是 inflate 出来再把 R.id.toolbar 设 GONE，这里直接不 inflate）；
+ * - **独立**（TemplateActivity「关注者的小说」，showToolbar=true）：自带返回箭头 + 标题。
+ *
+ * 筛选范围（全部 / 公开 / 私人）与插画列表同一套契约：值归 [RestrictViewModel]（零捕获 +
+ * 跨视图重建存活，理由见该类），宿主通过 [setRestrict] 推进来，**变了才重拉**。
+ * 这也修掉了 legacy 的一个隐患：legacy 把 restrict 记在 Fragment 字段 + arguments 里，
+ * 旋转后 initBundle 会把它复位成「创建时」的那个值，与实际在显示的数据脱节。
+ */
+class FollowingNovelFeedFragment : NovelFeedFragment() {
+
+    /**
+     * 铺到屏幕底,底部安全区靠 inset 补:无底栏的宿主是手势条/导航栏,首页那份是浮在内容之上的
+     * 底栏高度(MainActivity 重写了分发给内容区的 inset)。以前首页是 view_pager 让位给底栏,
+     * 这里保持 false;现在底栏会跟随滚动收起,内容必须铺满整屏,改由列表自己补 padding。
+     */
+    override val applyBottomSafeInset: Boolean = true
+
+    // 动态页主动刷新（下拉或底栏点击）期望回到顶部查看最新关注小说
+    override val resetScrollOnRefresh: Boolean = true
+
+    private val restrictViewModel: RestrictViewModel by viewModels()
+
+    /** legacy 默认带 toolbar（TemplateActivity 走无参构造，hideToolbar=false），保持一致。 */
+    private val showToolbar: Boolean by lazy(LazyThreadSafetyMode.NONE) {
+        arguments?.getBoolean(ARG_SHOW_TOOLBAR, true) ?: true
+    }
+
+    override val feedViewModel by feedViewModels {
+        // 取成局部 val:捕获的是 VM 实例(与 FeedViewModel 同 store、同寿命),不是 Fragment
+        val holder = restrictViewModel
+        pixivFeedSource({ Client.appApi.getFollowingNovels(holder.restrict) }) { resp, _ ->
+            mapFollowingNovelPage(resp.displayList)
+        }
+    }
+
+    /**
+     * 内嵌动态页那张圆角 sheet 时，底色要跟 sheet 同源，否则会裂出一道撞色横缝
+     * （取值理由见 [FollowingIllustFeedFragment.feedRootBackgroundColor]，两条列表必须一致）。
+     * 独立页走 fragment_toolbar_feed，根布局不是 feed_root，基类不会用到本属性。
+     */
+    override val feedRootBackgroundColor: Int
+        get() = V3Palette.from(requireContext()).cardFill
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 只在首次创建时用宿主给的初始 restrict 播种：必须赶在 feedViewModel（onViewCreated 里
+        // 才建）之前写好，否则 autoLoad 的首屏会先按默认「全部」拉一次、再被 setRestrict 重拉一次。
+        // 重建（旋转/深色）时 VM 里已经是最新值，不能被 arguments 里那份「创建时」的旧值盖回去
+        // ——legacy 就是每次 initBundle 都从 arguments 复位，才有了上面类文档说的脱节。
+        if (savedInstanceState == null) {
+            arguments?.getString(ARG_RESTRICT)?.takeIf { it.isNotEmpty() }?.let {
+                restrictViewModel.restrict = it
+            }
+        }
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?,
+    ): View {
+        // showToolbar 是运行时参数，系统重建只走无参构造，不能靠构造器传 contentLayoutId，
+        // 改在这里按参数选骨架（两张布局都带同结构的 feed_root）。对齐 UserNovelFeedFragment。
+        val layoutId = if (showToolbar) R.layout.fragment_toolbar_feed else ceui.pixiv.feeds.R.layout.fragment_feed
+        return inflater.inflate(layoutId, container, false)
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        viewLifecycleOwner.observeR18FilterChanges(requireContext(), ::onR18FilterChanged)
+        if (!showToolbar) return
+        val binding = FragmentToolbarFeedBinding.bind(view)
+        setUpToolbar(binding, feedBinding.feedListView)
+        binding.toolbarTitle.setText(R.string.string_197) // 关注者的最新小说
+    }
+
+    /**
+     * 切筛选范围（宿主筛选条选中另一项时调）。对齐 legacy FragmentNewNovels.setRestrict：
+     * **变了才重拉**，没变是 no-op。
+     */
+    fun setRestrict(restrict: String) {
+        if (restrictViewModel.restrict == restrict) return
+        restrictViewModel.restrict = restrict
+        // forceRefresh 在 view 未创建时安全 no-op：此时首屏也还没拉过，
+        // 会自然用上面刚写进去的新 restrict
+        forceRefresh()
+    }
+
+    /**
+     * 全局「R-18 过滤」开关变了：就地重算每篇小说的显隐，不重新拉数据。
+     *
+     * 条目从来没被摘走（mapper 只打隐藏标记），所以关掉开关时它们原地回来。
+     */
+    private fun onR18FilterChanged() {
+        applyItemVisibility { item ->
+            (item as? NovelFeedItem)?.withR18Hidden(Shaft.sSettings.isR18FilterTempEnable) ?: item
+        }
+    }
+
+    companion object {
+        const val ARG_SHOW_TOOLBAR = "show_toolbar"
+        const val ARG_RESTRICT = "restrict"
+
+        @JvmStatic
+        @JvmOverloads
+        fun newInstance(
+            showToolbar: Boolean = true,
+            restrict: String = Params.TYPE_ALL,
+        ): FollowingNovelFeedFragment {
+            return FollowingNovelFeedFragment().apply {
+                arguments = Bundle().apply {
+                    putBoolean(ARG_SHOW_TOOLBAR, showToolbar)
+                    putString(ARG_RESTRICT, restrict)
+                }
+            }
+        }
+
+        /** 页响应 → 条目。跑在 Default 线程、被 VM 长期持有，放伴生对象保证零捕获。 */
+        private fun mapFollowingNovelPage(novels: List<Novel>): List<FeedItem> {
+            val hideBookmarked = Shaft.sSettings.isDeleteStarIllust
+            val r18FilterOn = Shaft.sSettings.isR18FilterTempEnable
+            return novels.mapNotNull {
+                // 「过滤已收藏」仍然是丢：用户要的是它别出现，而且它走设置页改、回来有 onResume
+                if (hideBookmarked && it.is_bookmarked == true) return@mapNotNull null
+                // R-18 只打隐藏标记、不丢条目（见 FeedUiState.visibleItems）：这个开关是长按侧边栏
+                // 头像切的临时开关，随时可能被关掉，条目留在列表里才能原地回来，不必重新拉一次
+                NovelFeedItem.of(it, skipR18Filter = true)?.withR18Hidden(r18FilterOn)
+            }
+        }
+
+        /**
+         * R-18 过滤的标记口径，两个方向共用：开关开着且这篇算 R-18 就藏，否则放出来。
+         *
+         * 判定用 [IllustNovelFilter.hitsR18Filter]（不看开关）而不是 `judgeR18Filter`——后者在
+         * 开关关着时恒为 false，拿不到「它本来是 R-18」这个事实，关掉开关时就放不回来。
+         */
+        private fun NovelFeedItem.withR18Hidden(filterOn: Boolean): NovelFeedItem =
+            withHidden(filterOn && IllustNovelFilter.hitsR18Filter(novel))
+    }
+}
