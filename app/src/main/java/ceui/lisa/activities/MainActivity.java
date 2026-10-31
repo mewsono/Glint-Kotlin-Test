@@ -64,7 +64,6 @@ import ceui.lisa.utils.Params;
 import ceui.lisa.utils.ReverseImage;
 import ceui.lisa.view.DrawerLayoutViewPager;
 import ceui.pixiv.config.RemoteAppConfig;
-import ceui.pixiv.push.InAppPushCenter;
 import ceui.pixiv.services.ServicesProvider;
 import ceui.pixiv.session.SessionManager;
 import ceui.pixiv.shaftapi.Nana7miPlan;
@@ -290,11 +289,6 @@ public class MainActivity extends BaseActivity<ActivityCoverBinding>
                 ((ServicesProvider) getApplication()).getRemoteAppConfig();
         remoteAppConfig.getNana7miPlanLive().observe(this, plan -> bindPlanBadge());
         remoteAppConfig.getReferralEnabledLive().observe(this, enabled -> buildDrawerMenu());
-        // 应用内推送(付费用户公告)也是这次冷启动配置捎回来的,同样异步落地。只弹一次、
-        // 弹过就回执,去重和让路(评分框)都在 InAppPushCenter 里。
-        remoteAppConfig
-                .getInAppPushLive()
-                .observe(this, arrival -> InAppPushCenter.INSTANCE.onConfigArrived(this, arrival));
         baseBind.drawerHeader.setOnClickListener(v -> openMyUserPage());
         // 头部右侧的切换图标直达账号管理页,不再经过整块的主页跳转
         baseBind.drawerSwitchAccount.setOnClickListener(v -> openAccountSwitch());
@@ -668,9 +662,6 @@ public class MainActivity extends BaseActivity<ActivityCoverBinding>
         // 浏览记录云同步同意框不在首页弹,改到用户点进浏览历史页时再问(见 FragmentHistoryTabs / issue #889)。
         baseBind.viewPager.postDelayed(
                 () -> {
-                    // 应用内推送正在展示就这次不弹评分框(showIfNeeded 没跑到就不消耗那一次机会),
-                    // 两个框叠在一起谁都看不清。
-                    if (InAppPushCenter.INSTANCE.isShowing()) return;
                     ceui.pixiv.widgets.RateAppDialog.Companion.showIfNeeded(
                             getSupportFragmentManager());
                 },

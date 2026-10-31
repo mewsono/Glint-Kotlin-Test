@@ -21,7 +21,6 @@ import ceui.pixiv.witstudio.dialog.WitDialog;
 import ceui.pixiv.witstudio.dialog.WitDialogAction;
 import ceui.lisa.core.JavaAsync;
 import ceui.pixiv.ui.navigation.TemplateRoute;
-import ceui.pixiv.ui.referral.ReferralPlanFragment;
 
 public class OutWakeActivity extends BaseActivity<ActivityOutWakeBinding> {
 
@@ -207,7 +206,6 @@ public class OutWakeActivity extends BaseActivity<ActivityOutWakeBinding> {
         // shaftintent://referral?code=… 推介计划。落地页发的是 shaftintent://referral，
         // 经过一次 302 之后 host 后面可能多一个「/」,所以只认 host,不看 path。
         if (HOST_REFERRAL.equals(host)) {
-            openReferral(uri.getQueryParameter("code"));
             return true;
         }
 
@@ -230,27 +228,6 @@ public class OutWakeActivity extends BaseActivity<ActivityOutWakeBinding> {
     private void openUser(String userId) {
         Intent intent = new Intent(mContext, UActivity.class);
         intent.putExtra(Params.USER_ID, Common.safeUserId(userId));
-        startActivity(intent);
-        finish();
-    }
-
-    /**
-     * 打开推介页,并把邀请码一路带进去。
-     *
-     * 码不在这里校验:合法性由服务端说了算,这里多一层判断只会让「码其实是对的、但本地
-     * 规则过时了」变成一个查不出来的静默失败。带不进去的最坏情况是用户自己再粘一次。
-     */
-    private void openReferral(String code) {
-        if (!SessionManager.INSTANCE.isLoggedIn()) {
-            ceui.pixiv.ui.referral.ReferralPendingInvite.remember(code);
-            backToLoginScreen();
-            return;
-        }
-        Intent intent = new Intent(mContext, TemplateActivity.class);
-        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.REFERRAL_PLAN.key);
-        if (!TextUtils.isEmpty(code)) {
-            intent.putExtra(ReferralPlanFragment.ARG_CODE, code);
-        }
         startActivity(intent);
         finish();
     }

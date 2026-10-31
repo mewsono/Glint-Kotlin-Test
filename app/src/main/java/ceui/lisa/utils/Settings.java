@@ -16,7 +16,6 @@ import ceui.lisa.helper.ThemeHelper;
 import ceui.lisa.http.ImageReadTimeout;
 import ceui.pixiv.cache.ImageCacheQuota;
 import ceui.pixiv.download.toast.DownloadToastKind;
-import ceui.pixiv.snapshot.AutoSnapshotQuota;
 /**
  * A class about all the application settings.
  * */
@@ -415,7 +414,10 @@ public class Settings {
     private volatile boolean autoSnapshotOnIllustManga = false; // 试验性：插画/漫画自动生成快照
 
     /** 试验性：自动快照总大小上限（MB）；默认等于旧硬编码 200 MB。 */
-    private volatile int autoSnapshotMaxMb = AutoSnapshotQuota.DEFAULT_LIMIT_MB;
+    /** 快照配额（MB）。快照功能已随 `lean` 删除，这里只剩存量设置的读写，保持可解析。 */
+    private volatile int autoSnapshotMaxMb = 1024;
+    private static final int AUTO_SNAPSHOT_MIN_MB = 128;
+    private static final int AUTO_SNAPSHOT_MAX_MB = 102400;
 
     /** 图片缓存「预期上限」（MB）；只在 Glide 初始化时生效，改完需重启 App。默认 = Glide 原生 250 MB。 */
     private volatile int imageCacheMaxMb = ImageCacheQuota.DEFAULT_LIMIT_MB;
@@ -1341,11 +1343,11 @@ public class Settings {
     }
 
     public int getAutoSnapshotMaxMb() {
-        return AutoSnapshotQuota.clampLimitMb(autoSnapshotMaxMb);
+        return Math.max(AUTO_SNAPSHOT_MIN_MB, Math.min(AUTO_SNAPSHOT_MAX_MB, autoSnapshotMaxMb));
     }
 
     public void setAutoSnapshotMaxMb(int autoSnapshotMaxMb) {
-        this.autoSnapshotMaxMb = AutoSnapshotQuota.clampLimitMb(autoSnapshotMaxMb);
+        this.autoSnapshotMaxMb = Math.max(AUTO_SNAPSHOT_MIN_MB, Math.min(AUTO_SNAPSHOT_MAX_MB, autoSnapshotMaxMb));
     }
 
     public int getImageCacheMaxMb() {
