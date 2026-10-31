@@ -76,39 +76,6 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/provider_paths"/>
         </provider>
-        <!-- Muzei 动态壁纸来源(issue #548)。authority 跟随 applicationId,debug/release 包不撞。
-             exported + ACCESS_PROVIDER 签名级权限是 Muzei 的固定要求,只有 Muzei 本体能读。 -->
-        <provider
-            android:name="ceui.pixiv.muzei.ShaftMuzeiArtProvider"
-            android:authorities="${applicationId}.muzei"
-            android:description="@string/muzei_provider_description"
-            android:exported="true"
-            android:label="@string/muzei_provider_label"
-            android:permission="com.google.android.apps.muzei.api.ACCESS_PROVIDER">
-            <intent-filter>
-                <action android:name="com.google.android.apps.muzei.api.MuzeiArtProvider"/>
-            </intent-filter>
-            <meta-data
-                android:name="settingsActivity"
-                android:value="ceui.pixiv.muzei.MuzeiSettingsActivity"/>
-        </provider>
-        <!-- 让 Muzei 已缓存的壁纸出现在系统文件选择器 / Files 里(官方推荐附带) -->
-        <provider
-            android:name="com.google.android.apps.muzei.api.provider.MuzeiArtDocumentsProvider"
-            android:authorities="${applicationId}.muzei.documents"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:permission="android.permission.MANAGE_DOCUMENTS">
-            <intent-filter>
-                <action android:name="android.content.action.DOCUMENTS_PROVIDER"/>
-            </intent-filter>
-        </provider>
-        <!-- Muzei 的「来源设置」入口指过来,必须 exported;也从 Shaft 设置 → 界面 进入 -->
-        <activity
-            android:name="ceui.pixiv.muzei.MuzeiSettingsActivity"
-            android:exported="true"
-            android:label="@string/muzei_settings_title"
-            android:theme="@style/SplashTheme"/>
         <activity
             android:name=".activities.MainActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
@@ -232,50 +199,5 @@
             android:name="ceui.pixiv.ui.slideshow.SlideshowActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
             android:theme="@style/SlideshowTheme"/>
-        <receiver
-            android:name="ceui.pixiv.widget.SpotlightWidgetProvider"
-            android:exported="false"
-            android:label="@string/v3_widget_spotlight_label">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/v3_spotlight_widget_info"/>
-        </receiver>
-        <receiver
-            android:name="ceui.pixiv.widget.DailyRankStripWidgetProvider"
-            android:exported="false"
-            android:label="@string/v3_widget_daily_rank_label">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/v3_daily_rank_strip_widget_info"/>
-        </receiver>
-        <receiver
-            android:name="ceui.pixiv.widget.RecommendStripWidgetProvider"
-            android:exported="false"
-            android:label="@string/v3_widget_recommend_strip_label">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/v3_recommend_strip_widget_info"/>
-        </receiver>
-        <receiver
-            android:name="ceui.pixiv.widget.RecommendCardWidgetProvider"
-            android:exported="false"
-            android:label="@string/v3_widget_recommend_card_label">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/v3_recommend_card_widget_info"/>
-        </receiver>
-        <receiver android:name="ceui.pixiv.widget.WidgetBookmarkReceiver" android:exported="false"/>
     </application>
 </manifest>

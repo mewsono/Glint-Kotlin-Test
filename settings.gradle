@@ -5,6 +5,5 @@ plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 
-include ':app', ':models', ':progressmanager', ':actionqueue', ':feeds', ':witstudio', ':websocket', ':banner', ':panel', ':safe'
+include ':app', ':models', ':progressmanager', ':actionqueue', ':feeds', ':witstudio', ':panel', ':safe'
 include ':communication'
-include ':applock'

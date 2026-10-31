@@ -13,15 +13,7 @@ import ceui.pixiv.actionqueue.ActionQueue
 import ceui.pixiv.actionqueue.ActionRequest
 import ceui.pixiv.actionqueue.PendingAction
 import ceui.pixiv.actionqueue.QueuePolicy
-import ceui.pixiv.db.mirror.MirrorContentType
-import ceui.pixiv.db.mirror.MirrorRestrict
-import ceui.pixiv.events.EventReporter
 import ceui.pixiv.session.SessionManager
-import ceui.pixiv.ui.referral.ReferralActivityReporter
-import ceui.pixiv.snapshot.AutoSnapshotEngine
-import ceui.pixiv.snapshot.SnapshotBackfill
-import ceui.pixiv.websocket.AppNetworkMonitor
-import ceui.pixiv.websocket.NetworkMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -36,7 +28,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import ceui.pixiv.db.discovery.ProfileManager
-import ceui.pixiv.db.mirror.BookmarkMirrorService
+import ceui.pixiv.utils.NetworkStateManager
 
 /**
  * 收藏 / 关注这类写操作的进程级队列宿主。
@@ -56,8 +48,7 @@ import ceui.pixiv.db.mirror.BookmarkMirrorService
 class PixivActionQueue @Inject constructor(
     @ApplicationContext app: Context,
     private val profileManager: ProfileManager,
-    private val eventReporter: EventReporter,
-    private val bookmarkMirror: BookmarkMirrorService,
+    private val networkStateManager: NetworkStateManager,
 ) {
 
     private val app: Context = app.applicationContext
@@ -86,18 +77,16 @@ class PixivActionQueue @Inject constructor(
     @Volatile
     private var downloadQueue: ActionQueue? = null
 
-    /** 「补齐收藏快照」（#1275）：又一条独立队列，业务状态较多，单独成类，同样在 [start] 里启动。 */
-    val snapshotBackfill = SnapshotBackfill(this.app)
-
     /** 幂等。由 [ceui.lisa.activities.Shaft] 调，必须排在 SessionManager.initialize 之后（gate 要读登录态）。 */
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        // 进程级共用那一个 monitor：它按订阅数注册/注销系统 NetworkCallback，各自 new 一个
-        // 等于各注册一个回调，与该类「全进程只注册一个」的设计相悖。
-        val monitor = AppNetworkMonitor.get(app)
-        val isOnline = { monitor.isConnected }
+        // 进程级共用那一个 NetworkStateManager（@Singleton，Hilt 注入）：进程内只注册一个
+        // 系统 NetworkCallback，各自 new 一个等于各注册一个回调。
+        val isOnline = { networkStateManager.networkState.value?.isOnline == true }
 
-        val gate: suspend () -> Boolean = { SessionManager.isLoggedIn && monitor.isConnected }
+        val gate: suspend () -> Boolean = {
+            SessionManager.isLoggedIn && networkStateManager.networkState.value?.isOnline == true
+        }
         val owner: suspend () -> String = { SessionManager.loggedInUid.toString() }
 
         val instance = ActionQueue.withRoomStore(
@@ -145,9 +134,7 @@ class PixivActionQueue @Inject constructor(
         observeDownloads(downloads)
         downloads.start()
 
-        snapshotBackfill.start(monitor)
-
-        observeGateSignals(listOf(instance, downloads), monitor)
+        observeGateSignals(listOf(instance, downloads))
         pruneStaleFailures(instance)
         pruneStaleFailures(downloads)
         Timber.tag(TAG).i("action queue started, minGap=%dms", MIN_GAP_MS)
@@ -193,10 +180,13 @@ class PixivActionQueue @Inject constructor(
      * 用 [ActionQueue.kick] 而不是 `resume()`：后者还会清掉暂停标志，等于让一次网络抖动
      * 顺手解除用户主动按下的暂停。这里要的只是「重新看一眼队列」。
      */
-    private fun observeGateSignals(instances: List<ActionQueue>, monitor: NetworkMonitor) {
+    private fun observeGateSignals(instances: List<ActionQueue>) {
+        // 网络回来立刻踢一次队列：网络抖动期间排下的收藏不该等到 60 秒兜底轮询才发出去。
         feedbackScope.launch {
-            monitor.observeConnectivity.collect { online ->
-                if (online) instances.forEach { it.kick() }
+            withContext(Dispatchers.Main) {
+                networkStateManager.networkState.observeForever { state ->
+                    if (state.isOnline) instances.forEach { it.kick() }
+                }
             }
         }
         // 登录 / 换账号：owner 变了，队列要重新按新账号取行。
@@ -297,161 +287,37 @@ class PixivActionQueue @Inject constructor(
     }
 
     /**
-     * 服务端确认之后才上报。
+     * 服务端确认之后才更新发现画像。
      *
-     * 不能在点击时就报：那条动作还可能因为 429 打满重试、作品已删除等原因终态失败并被回滚，
-     * 而埋点一旦发出去就撤不回来（协议里没有反向事件），社区热度榜就会按一堆从未发生过的
-     * 收藏来排序。发现画像（[ProfileManager]）同理 —— 它决定后续推荐，喂进去的必须是真的
-     * 发生过的行为。
+     * 不能在点击时就更新：那条动作还可能因为 429 打满重试、作品已删除等原因终态失败并被
+     * 回滚，而画像决定后续推荐，喂进去的必须是真的发生过的行为。
+     *
+     * 原实现还要在这里发社区埋点、维护书签镜像、触发自动快照 —— 这些功能已在 `lean`
+     * 分支整体删除（见 CLEANUP_MANIFEST.md §8「Never restore」），只保留画像更新。
      */
     private suspend fun report(event: ActionEvent.Succeeded) {
         val action = event.action
         when (action.type) {
             PixivActionTypes.ILLUST_BOOKMARK -> {
                 val payload = action.parsePayload<BookmarkPayload>() ?: return unparsable(action)
-                if (payload.bookmark) action.owner.toLongOrNull()?.let(ReferralActivityReporter::onBookmark)
-                // meta 兜底链:Illust 池 → API。
-                // 队列化之前(4.8.3)点击路径自带 API 兜底;收编进队列后只读 Illust 池,
-                // 池里没有的收藏事件全部无 meta 上报,操作记录页整页读不出条目(#1010),
-                // 且 manga 因取不到 type 全被误报成 illust。
-                val illust = ObjectPool.get<Illust>(payload.id).value
-                val fetched = if (illust == null) {
-                    withContext(Dispatchers.IO) {
-                        runCatching { Client.appApi.getIllust(payload.id).illust }.getOrNull()
-                    }
-                } else null
-                // pixiv 把漫画存成 type == "manga" 的 illust，按语义目标分开埋点。
-                val type = illust?.type ?: fetched?.type
-                val target = if (type == "manga") {
-                    EventReporter.Target.MANGA
-                } else {
-                    EventReporter.Target.ILLUST
-                }
-                eventReporter.report(
-                    if (payload.bookmark) EventReporter.Type.BOOKMARK else EventReporter.Type.UNBOOKMARK,
-                    target,
-                    payload.id,
-                    illust ?: fetched,
-                )
-                // 画像只吃 Illust（要读 tags 和作者）。池里没有就跳过：进程重启后
-                // 补发的那条本来就没有 bean 可读，漏一次画像强化远好过为它多打一次网络。
-                if (payload.bookmark) {
-                    ObjectPool.get<Illust>(payload.id).value?.let(profileManager::onBookmarkIllust)
-                }
-
-                // 事件驱动：收藏被服务端确认成功后再触发自动快照。
-                // 此时读取 ObjectPool 里的值已经是“本地乐观态 == 服务端确认态”，
-                // 不再与队列竞争数据；只有单点收藏/按标签收藏的 payload 才带 autoSnapshot。
-                if (payload.bookmark && payload.autoSnapshot) {
-                    val confirmed = ObjectPool.get<Illust>(payload.id).value
-                        ?.takeIf { it.is_bookmarked == true }
-                        ?: (illust ?: fetched)?.takeIf { it.is_bookmarked == true }
-                    confirmed?.let(AutoSnapshotEngine::onBookmarkConfirmed)
-                }
-
-                // 收藏镜像的本地维护。**在这里而不是点击时**，理由和上面的埋点一样：
-                // 队列还可能因为 429 打满重试或作品已删除而终态失败并回滚，那时镜像里
-                // 就会多出一条服务端根本不存在的收藏。
-                // 这条路径承担了「同步完成过一次，以后只维护」的大半：用户在 app 里的
-                // 每一次收藏/取消都直接改本地表，一次网络请求都不用多打。
-                syncBookmarkMirror(
-                    MirrorContentType.ILLUST,
-                    payload,
-                    illustOrNull = illust ?: fetched,
-                    novelOrNull = null,
-                )
+                if (!payload.bookmark) return
+                // 画像只吃 Illust（要读 tags 和作者）。池里没有就跳过：进程重启后补发的
+                // 那条本来就没有 bean 可读，漏一次画像强化远好过为它多打一次网络。
+                ObjectPool.get<Illust>(payload.id).value?.let(profileManager::onBookmarkIllust)
             }
 
-            PixivActionTypes.NOVEL_BOOKMARK -> {
-                val payload = action.parsePayload<BookmarkPayload>() ?: return unparsable(action)
-                if (payload.bookmark) action.owner.toLongOrNull()?.let(ReferralActivityReporter::onBookmark)
-                // 统一 Novel 池命中优先，进程重启后的补发再走 API 兜底。
-                val novel = ObjectPool.get<Novel>(payload.id).value
-                    ?: withContext(Dispatchers.IO) {
-                        runCatching { Client.appApi.getNovel(payload.id).novel }.getOrNull()
-                    }
-                eventReporter.report(
-                    if (payload.bookmark) EventReporter.Type.BOOKMARK else EventReporter.Type.UNBOOKMARK,
-                    EventReporter.Target.NOVEL,
-                    payload.id,
-                    novel,
-                )
-                syncBookmarkMirror(
-                    MirrorContentType.NOVEL,
-                    payload,
-                    illustOrNull = null,
-                    novelOrNull = novel,
-                )
-            }
+            PixivActionTypes.NOVEL_BOOKMARK -> Unit
 
             PixivActionTypes.USER_FOLLOW -> {
                 val payload = action.parsePayload<FollowPayload>() ?: return unparsable(action)
-                if (payload.visibilityOnly) {
-                    // 只是换了可见性，不是新关注：不埋点、不再给画像加一次关注分，镜像换书架即可。
-                    syncFollowMirror(payload)
-                    return
-                }
-                // reportFollowUser 自己做 ObjectPool 命中→getUserProfile 兜底的解析，
-                // 调用方不用先把 User 取到手 —— 省掉了 UActivity 里那次「等 profile 回来
-                // 才敢关注」的等待，那期间页面被销毁的话意图就丢了。
-                eventReporter.reportFollowUser(payload.userId, payload.follow)
+                // 只是换了可见性，不是新关注：不给画像加一次关注分。
+                if (payload.visibilityOnly) return
                 if (payload.follow) {
                     profileManager.onFollowUser(payload.userId)
                 } else {
                     profileManager.onUnfollowUser(payload.userId)
                 }
-                syncFollowMirror(payload)
             }
-        }
-    }
-
-    /**
-     * 关注 / 取关被确认后同步进关注镜像（与 [syncBookmarkMirror] 同一个理由放在确认之后）。
-     *
-     * 关注要一份 [User] 才能入库；池里没有就放弃这一条，下一次增量维护会在表头扫到它。
-     */
-    private fun syncFollowMirror(payload: FollowPayload) {
-        if (!payload.follow) {
-            bookmarkMirror.onUnbookmarked(MirrorContentType.USER, payload.userId)
-            return
-        }
-        val user = ObjectPool.get<User>(payload.userId).value ?: return
-        bookmarkMirror.onUserFollowed(user, MirrorRestrict.ofApiValue(payload.restrict))
-    }
-
-
-    /**
-     * 把一次已被服务端确认的收藏 / 取消收藏同步进收藏镜像表。
-     *
-     * - **收藏**：需要一份带 `is_bookmarked = true` 的 bean 才能入库（镜像行里存的是完整
-     *   JSON，将来直接渲染卡片）。池里没有、API 也没兜到时就放弃这一条 —— 缺的那条会在
-     *   下一次增量维护里被表头扫到，不值得为它专门再打一次请求。
-     * - **取消**：不需要 bean，按 id 跨公开/悄悄两个书架删。
-     *
-     * 书架没被注册过（用户从没打开过那个收藏页）时引擎自己会忽略，这里不必判断。
-     */
-    private fun syncBookmarkMirror(
-        contentType: MirrorContentType,
-        payload: BookmarkPayload,
-        illustOrNull: ceui.pixiv.api.model.Illust?,
-        novelOrNull: ceui.loxia.Novel?,
-    ) {
-        if (!payload.bookmark) {
-            bookmarkMirror.onUnbookmarked(contentType, payload.id)
-            return
-        }
-        val restrict = MirrorRestrict.ofApiValue(payload.restrict)
-        when (contentType) {
-            MirrorContentType.ILLUST -> {
-                val bean = ObjectPool.get<Illust>(payload.id).value ?: illustOrNull ?: return
-                bookmarkMirror.onIllustBookmarked(bean.withBookmarked(true), restrict)
-            }
-            MirrorContentType.NOVEL -> {
-                val bean = ObjectPool.get<Novel>(payload.id).value ?: novelOrNull ?: return
-                bookmarkMirror.onNovelBookmarked(bean.withBookmarked(true), restrict)
-            }
-            // 关注不走收藏动作，见 syncFollowMirror
-            MirrorContentType.USER -> Unit
         }
     }
 

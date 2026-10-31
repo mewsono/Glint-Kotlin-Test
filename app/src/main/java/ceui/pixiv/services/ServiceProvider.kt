@@ -4,22 +4,14 @@ import android.content.Context
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import ceui.lisa.viewmodel.AppLevelState
-import ceui.pixiv.actions.AccountOnlineReportOutbox
-import ceui.pixiv.actions.Nana7miSearchTelemetry
 import ceui.pixiv.actions.PixivActionQueue
-import ceui.pixiv.chat.api.ShaftChatGateway
 import ceui.pixiv.config.RemoteAppConfig
 import ceui.pixiv.db.EntityWrapper
 import ceui.pixiv.db.discovery.DiscoveryPool
 import ceui.pixiv.db.discovery.ProfileManager
-import ceui.pixiv.db.mirror.BookmarkMirrorService
-import ceui.pixiv.events.EventReporter
 import ceui.pixiv.ui.bulk.QueueDownloadManager
-import ceui.pixiv.sticker.StickerRepository
 import ceui.pixiv.ui.fanbox.FanboxWebBridge
 import ceui.pixiv.ui.novel.reader.settings.ReaderFontRepository
-import ceui.pixiv.ui.translate.MangaBatchTranslateCenter
-import ceui.pixiv.ui.translate.MangaTranslateModels
 import ceui.pixiv.utils.NetworkStateManager
 import com.tencent.mmkv.MMKV
 
@@ -48,12 +40,6 @@ interface ServicesProvider {
     /** 关注/收藏态的进程级内存表（原 static `Shaft.appViewModel`）。 */
     val appLevelState: AppLevelState
 
-    /** 漫画翻译用的 OCR / 文本检测模型会话，批量与单页共用一份。 */
-    val mangaTranslateModels: MangaTranslateModels
-
-    /** 整本漫画批量翻译任务（跨 Activity 存活，所以是进程级）。 */
-    val mangaBatchTranslateCenter: MangaBatchTranslateCenter
-
     /** FANBOX post.info 只能从 WebView 发，这个桥持有那个不上屏的 WebView，可按需释放。 */
     val fanboxWebBridge: FanboxWebBridge
 
@@ -69,38 +55,12 @@ interface ServicesProvider {
     /** 发现页候选池。 */
     val discoveryPool: DiscoveryPool
 
-    /** 账号在线/失效上报的离线信箱。 */
-    val accountOnlineReportOutbox: AccountOnlineReportOutbox
-
-    /** nana7mi 搜索埋点（批量攒发）。 */
-    val nana7miSearchTelemetry: Nana7miSearchTelemetry
-
     /** 服务端下发的远程配置（按 uid 缓存）。 */
     val remoteAppConfig: RemoteAppConfig
-
-    /** shaft-events 埋点上报。 */
-    val eventReporter: EventReporter
-
-    /**
-     * 聊天 WebSocket 网关。构造廉价（只存 Application），真正建连在
-     * [ShaftChatGateway.bootstrap]，由 Shaft 的延迟批在 [eventReporter] start 之后调。
-     */
-    val chatGateway: ShaftChatGateway
-
-    /**
-     * 贴纸安装（聊天与广场共用一份，与登录无关）。构造廉价，磁盘目录与两个
-     * OkHttpClient 都在首次真的要贴纸时才建。
-     */
-    val stickerRepository: StickerRepository
-
-    /** 收藏镜像引擎：限速静默地把收藏列表整份镜像到本地，支撑倒序与花式筛选。 */
-    val bookmarkMirror: BookmarkMirrorService
 
     /** 小说阅读器可下载字体：关掉面板后下载继续，所以是进程级。 */
     val readerFontRepository: ReaderFontRepository
 
-    /** 应用更新包下载：关掉更新 sheet 后下载继续，跑完回前台发 banner，所以是进程级。 */
-    val apkDownloadManager: ceui.lisa.update.ApkDownloadManager
 }
 
 fun Context.appServices(): ServicesProvider = applicationContext as ServicesProvider

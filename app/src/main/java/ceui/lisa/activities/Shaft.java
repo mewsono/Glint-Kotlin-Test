@@ -83,8 +83,6 @@ public class Shaft extends Application implements ServicesProvider {
     // 进程级服务由 Hilt 以 @Singleton 构造，在 super.onCreate() 那一刻注入（Hilt 不能注入 private 字段）。
     // 构造契约见 ServicesProvider：廉价、不做 IO、不依赖本类 onCreate 里后续才就绪的状态。
     @Inject AppLevelState appLevelState;
-    @Inject ceui.pixiv.ui.translate.MangaTranslateModels mangaTranslateModels;
-    @Inject ceui.pixiv.ui.translate.MangaBatchTranslateCenter mangaBatchTranslateCenter;
     @Inject ceui.pixiv.ui.fanbox.FanboxWebBridge fanboxWebBridge;
     @Inject ceui.pixiv.ui.bulk.QueueDownloadManager queueDownloadManager;
     @Inject ceui.pixiv.actions.PixivActionQueue pixivActionQueue;
@@ -92,15 +90,8 @@ public class Shaft extends Application implements ServicesProvider {
             new ceui.pixiv.communication.CommunicationScope();
     @Inject ceui.pixiv.db.discovery.ProfileManager profileManager;
     @Inject ceui.pixiv.db.discovery.DiscoveryPool discoveryPool;
-    @Inject ceui.pixiv.actions.AccountOnlineReportOutbox accountOnlineReportOutbox;
-    @Inject ceui.pixiv.actions.Nana7miSearchTelemetry nana7miSearchTelemetry;
     @Inject ceui.pixiv.config.RemoteAppConfig remoteAppConfig;
-    @Inject ceui.pixiv.events.EventReporter eventReporter;
-    @Inject ceui.pixiv.chat.api.ShaftChatGateway chatGateway;
-    @Inject ceui.pixiv.sticker.StickerRepository stickerRepository;
-    @Inject ceui.pixiv.db.mirror.BookmarkMirrorService bookmarkMirror;
     @Inject ceui.pixiv.ui.novel.reader.settings.ReaderFontRepository readerFontRepository;
-    @Inject ceui.lisa.update.ApkDownloadManager apkDownloadManager;
 
     private EntityWrapper entityWrapper;
 
@@ -480,14 +471,6 @@ public class Shaft extends Application implements ServicesProvider {
         // 突然冒出来。init 自身只有 ~3ms（同步部分只是赋 context + launch）。
         queueDownloadManager.start();
 
-        // 自托管的应用更新下载器（进程级）。必须在这里恢复：
-        // 1) 冷启动要把「上次被系统杀掉时还在跑」的记录落成 PAUSED，而不是等用户
-        //    打开 sheet 才发现状态还写着 RUNNING；
-        // 2) 「下载完成但当时没有 sheet」的 banner 要等前台，它注册的
-        //    ActivityLifecycleCallbacks 得早于第一个 Activity 的 onResume。
-        // 本身只读一条 MMKV + stat 几个文件，不进延迟批。
-        apkDownloadManager.install();
-
         // v38 illustId 索引列的一次性存量回填：把老下载记录的 illustId 补上，让
         // “这幅画下过没” 从 illustGson blob 全表 LIKE 扫描（2GB+ 卡）转成走索引。
         // 后台跑、跑完置标志、幂等；跑完前 hasDownloadRecord 用旧 LIKE 兜底。
@@ -703,10 +686,6 @@ public class Shaft extends Application implements ServicesProvider {
         // 留下几百 MB 中间 PNG 且没有任何东西会去收。后台跑、失败静默。
         step("UgoiraEngine.sweep", () -> ceui.pixiv.ui.bulk.UgoiraEngine.sweepStaleRifeWork(this));
 
-        // 社区榜单事件上报（shaft-api-v2）。完全 fire-and-forget，失败静默，
-        // 任何崩溃都被它自己捕获。安全顺序：必须在 MMKV.initialize 之后。
-        step("EventReporter", eventReporter::start);
-
         // 收藏/关注的持久化限流队列。这类写操作原本是点一次发一次，连点或批量操作
         // 很容易被 pixiv 429；现在统一排队串行发送，撞限流整队冷却并自动重试，
         // 进程被杀后下次启动继续把没发完的发出去。
@@ -714,34 +693,6 @@ public class Shaft extends Application implements ServicesProvider {
         // EventReporter.start 之后（PixivActions 会埋点）。
         step("PixivActionQueue", pixivActionQueue::start);
 
-        // Nana7mi 搜索遥测使用独立的 ActionQueue 数据库和消费循环：同样具备落盘/重试，
-        // 但服务端或遥测自身故障绝不能拖慢收藏、关注等用户业务动作。
-        if (!ceui.lisa.BuildConfig.IS_LITE) {
-            step("Nana7miSearchTelemetry", nana7miSearchTelemetry::start);
-        }
-
-        // AccountResponse 上报使用独立的全局 outbox：它不属于当前登录用户，切账号或
-        // 登出后也必须继续补报刚 refresh 出来的新 token。
-        if (!ceui.lisa.BuildConfig.IS_LITE) {
-            step("AccountOnlineReportOutbox", accountOnlineReportOutbox::start);
-        }
-
-        // shaft-api-v2 chat WebSocket gateway. App-scoped — 一个 WebSocketManager
-        // 全局复用,生命周期与进程一致(匿名协议没有"退登")。必须在
-        // EventReporter.start 之后,因为 ShaftHmacAuthProvider 要靠
-        // currentClientId() 签 URL,init 同步把 clientId 写好。
-        step("ShaftChatGateway", chatGateway::bootstrap);
-
-        // In-app banner system. 必须在 ShaftChatGateway.bootstrap 之后,
-        // ChatBannerBridge 订阅 gateway.incoming。
-        // 传 currentActivity：它注册的两个 lifecycle callback 现在才挂上，首个 Activity
-        // 的 created/resumed 早过去了，不补这一下首屏整场都没有 banner 宿主。
-        step("InAppBanners", () -> {
-            ceui.pixiv.banner.host.InAppBanners.INSTANCE.bootstrap(this, currentActivity);
-            // 冷启动时首个 onResume 早于 banner 系统就绪，那条「更新包已下好」的
-            // 提示会在 onResume 里被跳过；这里补一次，免得它一直欠到用户下次切页。
-            apkDownloadManager.onBannerReady();
-        });
 
         // 网络变化时停掉下载队列。CONNECTIVITY_ACTION 只与下载有关，首帧不需要。
         step("NetWorkStateReceiver", () -> {
@@ -758,12 +709,6 @@ public class Shaft extends Application implements ServicesProvider {
         step("ShortcutHelper", ShortcutHelper::addAppShortcuts);
 
         // 收藏镜像引擎。启动只是把限速循环挂起来等信号：**没有任何一个书架被注册过的设备，
-        // 它一个请求都不会发**（书架只在用户真的打开某个收藏页时才注册，见
-        // BookmarkMirrorService.ensureShelf）。已注册的书架会从上次落盘的断点续上，
-        // 每 5 秒一页，静默地把没拉完的部分拉完。
-        // 安全顺序：必须在 SessionManager.initialize 之后（要读登录 uid）。
-        step("BookmarkMirror", bookmarkMirror::start);
-
         // 初始化发现池 + 异步构建用户画像
         step("DiscoveryPool", () -> {
             Timber.d("Discovery/Init >>> initializing DiscoveryPool");
@@ -783,10 +728,6 @@ public class Shaft extends Application implements ServicesProvider {
         // IO 线程、内部四重防线吞掉一切异常（见 SelfProfileWarmup）。安全顺序：必须在
         // SessionManager.initialize 之后（onCreate 已同步做完），否则读不到登录态白发一次。
         step("SelfProfileWarmup", ceui.pixiv.session.SelfProfileWarmup::trigger);
-
-        // 贴纸资源预热。**只读本地**：没装过就什么都不做（不发一个请求、不下一个字节），
-        // 已经装好的则在这里把校验跑完，免得用户第一次点开贴纸面板要干等几秒。
-        step("StickerWarmUp", () -> ceui.pixiv.sticker.StickerWarmUp.trigger(stickerRepository));
 
         // 同义词词典内置数据自动导入（issue #904）：启动 15 秒后后台静默导入，只导一次
         // （flag 记 MMKV 设备本地，不随 Settings 同步）。合并导入不覆盖用户已有词典。
@@ -854,7 +795,6 @@ public class Shaft extends Application implements ServicesProvider {
         // 字段在 onCreate 里构造；onCreate 中途抛异常时系统仍可能回调这里，判空兜底。
         if (level >= TRIM_MEMORY_BACKGROUND) {
             if (fanboxWebBridge != null) fanboxWebBridge.release();
-            if (mangaBatchTranslateCenter != null) mangaBatchTranslateCenter.releaseModelsIfIdle();
         }
     }
 
@@ -991,15 +931,7 @@ public class Shaft extends Application implements ServicesProvider {
         return appLevelState;
     }
 
-    @Override
-    public @NotNull ceui.pixiv.ui.translate.MangaTranslateModels getMangaTranslateModels() {
-        return mangaTranslateModels;
-    }
 
-    @Override
-    public @NotNull ceui.pixiv.ui.translate.MangaBatchTranslateCenter getMangaBatchTranslateCenter() {
-        return mangaBatchTranslateCenter;
-    }
 
     @Override
     public @NotNull ceui.pixiv.ui.fanbox.FanboxWebBridge getFanboxWebBridge() {
@@ -1026,48 +958,20 @@ public class Shaft extends Application implements ServicesProvider {
         return discoveryPool;
     }
 
-    @Override
-    public @NotNull ceui.pixiv.db.mirror.BookmarkMirrorService getBookmarkMirror() {
-        return bookmarkMirror;
-    }
 
-    @Override
-    public @NotNull ceui.pixiv.actions.AccountOnlineReportOutbox getAccountOnlineReportOutbox() {
-        return accountOnlineReportOutbox;
-    }
 
-    @Override
-    public @NotNull ceui.pixiv.actions.Nana7miSearchTelemetry getNana7miSearchTelemetry() {
-        return nana7miSearchTelemetry;
-    }
 
     @Override
     public @NotNull ceui.pixiv.config.RemoteAppConfig getRemoteAppConfig() {
         return remoteAppConfig;
     }
 
-    @Override
-    public @NotNull ceui.pixiv.events.EventReporter getEventReporter() {
-        return eventReporter;
-    }
 
-    @Override
-    public @NotNull ceui.pixiv.chat.api.ShaftChatGateway getChatGateway() {
-        return chatGateway;
-    }
 
-    @Override
-    public @NotNull ceui.pixiv.sticker.StickerRepository getStickerRepository() {
-        return stickerRepository;
-    }
 
     @Override
     public @NotNull ceui.pixiv.ui.novel.reader.settings.ReaderFontRepository getReaderFontRepository() {
         return readerFontRepository;
     }
 
-    @Override
-    public @NotNull ceui.lisa.update.ApkDownloadManager getApkDownloadManager() {
-        return apkDownloadManager;
-    }
 }

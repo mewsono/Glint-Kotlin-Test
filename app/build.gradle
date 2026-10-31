@@ -307,6 +307,8 @@ dependencies {
     implementation libs.androidxLifecycleLiveData
     implementation libs.androidxLifecycleViewModel
     implementation libs.androidxCore
+    // 原本由 firebase-analytics / COS SDK 传递引入；两者已移除，现显式声明。
+    implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.1.0'
     // 原本由 navigation-fragment-ktx 传递引入,移除 Navigation 后需直接声明,
     // 提供 Fragment.viewModels() / activityViewModels() 等 KTX 扩展。
     implementation libs.androidxFragment
@@ -350,8 +352,6 @@ dependencies {
     // net.csdn.roundview.RoundImageView is inflated directly by comment/plaza XML layouts.
     implementation libs.roundView
     implementation libs.okhttp
-    // SSE 标准解析(AiTranslator 流式翻译):与 okhttp 同版本,按规范处理多行 data/CRLF/注释行
-    implementation libs.okhttpSse
 
     // Cronet (Chromium 网络栈) 提供 QUIC/HTTP3 支持，绕过 GFW 的 TCP RST
     implementation libs.cronet
@@ -363,12 +363,6 @@ dependencies {
     // 列表框架（FeedSource / FeedViewModel / FeedFragment / FeedAdapter）。对 pixiv 一无所知，
     // 宿主特有的东西由 ShaftFeedHost 在 Shaft.onCreate 注入，见 ceui.pixiv.feeds.host。
     implementation project(path: ':feeds')
-    // WebSocket 客户端框架（RobustWebSocketClient / WebSocketManager / NetworkMonitor）。对 pixiv 一无所知，
-    // HMAC 签名与聊天报文模型在宿主 chat/api 侧，见 docs/ws-chat-integration.md。
-    implementation project(path: ':websocket')
-    // 应用内 banner 框架（BannerManager / BannerHostInstaller / 默认文字卡片）。对 pixiv 一无所知，
-    // 聊天报文 → banner 的桥接与 deep link 落地在宿主侧，见 ceui.pixiv.banner.host。
-    implementation project(path: ':banner')
     // 底部面板编排（PanelHost / BottomPanelCoordinator / WindowSoftInputModeLease）。对 pixiv 一无所知，
     // 只管键盘与面板互斥的高度动画，面板内容与草稿在宿主侧，见 ceui.pixiv.ui.comments。
     implementation project(path: ':panel')
@@ -379,9 +373,6 @@ dependencies {
     // no dependency on :app or Pixiv business models.
     implementation project(path: ':safe')
     implementation project(path: ':communication')
-    // 应用锁（issue #1197）：BiometricPrompt + 前后台判定 + 锁屏页。对 pixiv 一无所知，
-    // 宿主只提供主题；设置页入口在 FragmentSettingsAccount。
-    implementation project(path: ':applock')
     implementation libs.mmkv
     // 部分华为等 OEM 上 libmmkv.so 偶发 dlopen "not found"，ReLinker 兜底从 APK 抠 .so 按绝对路径加载。
     implementation libs.relinker
@@ -405,8 +396,6 @@ dependencies {
 
     implementation libs.androidxWork
 
-    // Muzei 动态壁纸来源(issue #548):MuzeiArtProvider + 文件选择器可见的 DocumentsProvider
-    implementation libs.muzei
 
     coreLibraryDesugaring libs.desugarJdkLibs
 }

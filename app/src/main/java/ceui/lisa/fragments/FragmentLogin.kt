@@ -175,44 +175,18 @@ class FragmentLogin : BaseFragment<ActivityLoginBinding>() {
         setupInsets()
         setupToolbar()
 
-        // On API 33+, wait for shader to compile before showing content
-        val waitForShader = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-
-        if (waitForShader) {
-            baseBind.tunnelBackground.alpha = 0f
-            baseBind.gradientScrim.alpha = 0f
-            baseBind.toolbar.alpha = 0f
-            baseBind.tunnelBackground.onReadyListener = {
-                val dur = 800L
-                baseBind.tunnelBackground.animate().alpha(1f).setDuration(1200).start()
-                baseBind.gradientScrim.animate().alpha(1f).setDuration(dur).start()
-                baseBind.toolbar.animate().alpha(1f).setDuration(dur).start()
-                baseBind.loadingSpinner.animate()
-                    .alpha(0f)
-                    .setDuration(300)
-                    .withEndAction { baseBind.loadingSpinner.visibility = View.GONE }
-                    .start()
-                val activePage = if (baseBind.languagePage.root.visibility != View.GONE)
-                    baseBind.languagePage.root else baseBind.loginPage.root
-                activePage.animate().alpha(1f).setDuration(dur).start()
-            }
-        } else {
-            baseBind.loadingSpinner.visibility = View.GONE
-        }
+        // 登录背景原本是 shader 隧道（API 33+ 要等它编译完再淡入）；`lean` 分支删掉了那层，
+        // 只剩渐变遮罩，没有需要等待的东西，直接显示内容。
+        baseBind.loadingSpinner.visibility = View.GONE
 
         if (AppLocales.hasUserConfigured) {
             baseBind.languagePage.root.visibility = View.GONE
             baseBind.loginPage.root.apply {
                 visibility = View.VISIBLE
                 alpha = 0f
-                if (!waitForShader) {
-                    animate().alpha(1f).setDuration(500).start()
-                }
+                animate().alpha(1f).setDuration(500).start()
             }
         } else {
-            if (waitForShader) {
-                baseBind.languagePage.root.alpha = 0f
-            }
             setupLanguagePage()
         }
         setupLoginPage()

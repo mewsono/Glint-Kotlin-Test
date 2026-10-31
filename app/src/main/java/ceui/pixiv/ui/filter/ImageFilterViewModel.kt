@@ -17,7 +17,7 @@ import ceui.pixiv.download.config.DownloadItems
 import ceui.pixiv.imageloader.PageImageSource
 import ceui.pixiv.imageloader.PageImageSourceResolver
 import ceui.pixiv.imageloader.awaitFile
-import ceui.pixiv.ui.upscale.decodeBoundedArgb
+import ceui.pixiv.utils.decodeBoundedArgb
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max

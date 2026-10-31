@@ -99,7 +99,7 @@ jobs:
             echo '```'
             if [ -f /tmp/build.log ]; then
               grep -E "^e: |^e: file|error:|FAILURE:|What went wrong|Caused by:|Execution failed" /tmp/build.log \
-                | sed 's|file:///home/runner/work/[^/]*/[^/]*/||' | head -120
+                | sed 's|file:///home/runner/work/[^/]*/[^/]*/||' | head -400
             fi
             echo '```'
             echo '**Tail**'

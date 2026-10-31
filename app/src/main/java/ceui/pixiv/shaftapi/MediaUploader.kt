@@ -5,7 +5,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import ceui.pixiv.api.Client
-import ceui.pixiv.ui.translate.awaitOkHttpCall
+import ceui.pixiv.utils.awaitOkHttpCall
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
