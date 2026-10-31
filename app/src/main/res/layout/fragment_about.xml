@@ -105,57 +105,6 @@
 
                     </RelativeLayout>
 
-                    <LinearLayout
-                        android:id="@+id/github_update_section"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical">
-
-                        <RelativeLayout
-                            android:id="@+id/check_update"
-                            style="@style/M3SetRow"
-                            android:background="@drawable/wit_row_mid">
-
-                            <LinearLayout
-                                style="@style/M3SetTexts"
-                                android:layout_marginEnd="130dp">
-
-                                <TextView
-                                    style="@style/M3SetTitle"
-                                    android:text="@string/check_for_updates" />
-                            </LinearLayout>
-
-                            <!-- 状态文案会长到「被速率限制，请于 18:38 后再试」这种程度，
-                                 M3SetValue 的 150dp + singleLine 会把它截成「请于 18:5…」。
-                                 这一行单独放宽并允许折成两行；行高是 wrap_content，会自动长高。 -->
-                            <TextView
-                                android:id="@+id/update_status"
-                                style="@style/M3SetValue"
-                                android:ellipsize="end"
-                                android:maxLines="2"
-                                android:maxWidth="220dp"
-                                android:singleLine="false" />
-
-                        </RelativeLayout>
-
-                        <RelativeLayout
-                            android:id="@+id/version_history"
-                            style="@style/M3SetRow"
-                            android:background="@drawable/wit_row_bottom">
-
-                            <LinearLayout style="@style/M3SetTexts">
-
-                                <TextView
-                                    style="@style/M3SetTitle"
-                                    android:text="@string/version_history" />
-                            </LinearLayout>
-
-                            <TextView style="@style/M3SetArrow" />
-
-                        </RelativeLayout>
-
-                    </LinearLayout>
-
                     <TextView
                         style="@style/M3SetHeader"
                         android:text="@string/string_202" />
