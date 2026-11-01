@@ -47,8 +47,6 @@ import ceui.lisa.utils.Params;
 import ceui.lisa.utils.Settings;
 import ceui.pixiv.ui.settings.MoonSync;
 import ceui.pixiv.ui.navigation.TemplateRoute;
-import ceui.pixiv.webdav.WebDavLastRun;
-import ceui.pixiv.webdav.WebDavPrefs;
 import ceui.pixiv.download.DownloadsRegistry;
 import ceui.pixiv.download.config.DownloadItems;
 import ceui.pixiv.download.model.RelativePath;
@@ -214,24 +212,9 @@ public class FragmentSettingsData extends SettingsPageFragment<FragmentSettingsD
     @Override
     public void onResume() {
         super.onResume();
-        refreshWebDavLabel();
     }
 
     /** WebDAV 入口行的状态文字：有备份记录时显示上次结果，否则显示功能简介。 */
-    private void refreshWebDavLabel() {
-        if (baseBind == null) return;
-        WebDavLastRun run = WebDavPrefs.INSTANCE.lastRun();
-        if (run == null) {
-            baseBind.webdavDesc.setText(R.string.webdav_settings_entry_desc);
-            return;
-        }
-        String when = android.text.format.DateUtils.formatDateTime(mContext, run.getTimeMs(),
-                android.text.format.DateUtils.FORMAT_SHOW_DATE | android.text.format.DateUtils.FORMAT_SHOW_TIME);
-        baseBind.webdavDesc.setText(run.getSuccess()
-                ? getString(R.string.webdav_entry_last_success, when)
-                : getString(R.string.webdav_entry_last_failed, when));
-    }
-
     /**
      * 备份成功提示里要展示的目录路径。备份文件经 OutPut.outPutBackupFile 走
      * [Bucket.Backup] 模板,最终落点由当前存储配置决定:非 SAF(图库/下载)是

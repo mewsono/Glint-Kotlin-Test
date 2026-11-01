@@ -70,3 +70,56 @@ fun connectedChoices(
     }
     return ConnectedChoices(buttons).also { it.applyState() }
 }
+
+/**
+ * 一行可横滑的胶囊选项（滤镜「调节」项那种）。同样是从删掉的 `ui/library` 里接手过来的最小实现：
+ * `select(index)` 换高亮，`view` 是一个 [android.widget.HorizontalScrollView]（调用方会往里塞 padding）。
+ */
+class ChoiceChips internal constructor(private val scroller: android.widget.HorizontalScrollView, private val row: LinearLayout) {
+    val view: android.view.View get() = scroller
+    private val buttons get() = (0 until row.childCount).map { row.getChildAt(it) as TextView }
+
+    var selectedIndex: Int = 0
+        private set
+
+    fun select(index: Int) {
+        if (index !in 0 until row.childCount) return
+        selectedIndex = index
+        buttons.forEachIndexed { i, button ->
+            val active = i == selectedIndex
+            button.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 999f
+                setColor(if (active) 0xFF3B6CF6.toInt() else 0x00000000)
+            }
+            button.setTextColor(if (active) 0xFFFFFFFF.toInt() else 0x993B6CF6.toInt())
+        }
+    }
+}
+
+/** 造一行可横滑的胶囊选项；[onSelect] 只在用户点击时回调。 */
+fun choiceChips(
+    context: Context,
+    labels: List<String>,
+    scroll: Boolean = true,
+    onSelect: (Int) -> Unit,
+): ChoiceChips {
+    val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    val density = context.resources.displayMetrics.density
+    labels.forEachIndexed { index, label ->
+        val chip = TextView(context).apply {
+            text = label
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            setPadding((14 * density).toInt(), (8 * density).toInt(), (14 * density).toInt(), (8 * density).toInt())
+            setOnClickListener { onSelect(index) }
+        }
+        row.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * density).toInt() })
+    }
+    val scroller = android.widget.HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        if (scroll) addView(row, android.widget.FrameLayout.LayoutParams(-2, -2))
+        else addView(row, android.widget.FrameLayout.LayoutParams(-1, -2))
+    }
+    return ChoiceChips(scroller, row).also { it.select(0) }
+}

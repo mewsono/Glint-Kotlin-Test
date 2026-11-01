@@ -42,7 +42,6 @@ import ceui.pixiv.ui.bulk.UgoiraPhase
 import ceui.pixiv.ui.bulk.UgoiraProgress
 import ceui.pixiv.utils.ppppx
 import ceui.pixiv.ui.bulk.UgoiraFrames
-import ceui.pixiv.snapshot.SnapshotManagerFragment
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.DataSource
 import com.bumptech.glide.load.engine.GlideException
@@ -830,8 +829,8 @@ internal fun openUgoiraViewer(view: View, illust: Illust, offline: OfflineUgoira
         putExtra("illust", illust)
         putExtra("dataType", if (offline != null) "快照大图" else "二级详情")
         if (offline != null) {
-            putExtra(SnapshotManagerFragment.ARG_SNAPSHOT_ID, offline.snapshotId)
-            putExtra(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, offline.isAuto)
+            putExtra("snapshot_id", offline.snapshotId)
+            putExtra("snapshot_is_auto", offline.isAuto)
         }
         putExtra("index", 0)
         putExtra(ImageDetailActivity.EXTRA_ENTER_BOUNDS, intArrayOf(

@@ -237,12 +237,6 @@ public class FragmentCollection extends BaseFragment<ViewpagerWithTablayoutBindi
     }
 
     /** 本页对应的本地库书架类型（type 0/1/2 → 插画 / 小说 / 关注）。 */
-    private ceui.pixiv.db.mirror.MirrorContentType libraryContentType() {
-        if (type == 1) return ceui.pixiv.db.mirror.MirrorContentType.NOVEL;
-        if (type == 2) return ceui.pixiv.db.mirror.MirrorContentType.USER;
-        return ceui.pixiv.db.mirror.MirrorContentType.ILLUST;
-    }
-
     /**
      * ⋯ 点开后的二级菜单。集中收口同类操作，避免 toolbar 上挂一堆图标。
      *
@@ -273,7 +267,6 @@ public class FragmentCollection extends BaseFragment<ViewpagerWithTablayoutBindi
                         intent.putExtra(Params.STAR_TYPE, restrict);
                         intent.putExtra(
                                 ceui.pixiv.ui.library.BookmarkLibraryUi.ARG_CONTENT_TYPE,
-                                libraryContentType().getCode());
                         startActivity(intent);
                     } else if (which == 1) {
                         long uid = SessionManager.INSTANCE.getLoggedInUid();

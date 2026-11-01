@@ -36,9 +36,7 @@ public class FragmentSettingsViewing extends SettingsPageFragment<FragmentSettin
      * RIFE 开关点了「开」但模型缺失、已跳下载页。此时开关只停在界面上的 on,设置尚未落盘;
      * 等 onResume 按模型是否真落盘决定「落盘 + toast」还是「拨回 off 且不落盘」。
      */
-    private boolean rifeAwaitingModel = false;
     /** 程序性回写开关(拨回 off)时抑制 listener,避免再次跳转或弹 toast。 */
-    private boolean rifeSuppressToggleCallback = false;
 
     @Override
     public void initLayout() {
@@ -203,198 +201,6 @@ public class FragmentSettingsViewing extends SettingsPageFragment<FragmentSettin
         // 等用户回来(onResume)再结算——真落了才落盘 + toast,没落就把开关拨回 off 且不落盘。
         // 归一化:别处(AI 设置页可长按删模型)把模型删掉后,把残留的 on 静默落回 false,
         // 保证「开关开 ⇒ 模型一定落盘」在任何入口下都成立。
-        if (ceui.pixiv.ui.interpolate.RifePrefs.isEnabled()
-                && !ceui.pixiv.ui.interpolate.RifeInterpolator.INSTANCE.isAvailable(mContext)) {
-            applyUgoiraRifeEnable(false);
-        }
-        baseBind.ugoiraRifeEnable.setChecked(ceui.pixiv.ui.interpolate.RifePrefs.isEnabled());
-        baseBind.ugoiraRifeEnable.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                if (rifeSuppressToggleCallback) {
-                    return;
-                }
-                // 用户的最新一次拨动说了算:跳下载页的那一下还没结算就又拨回 off,
-                // 回来时不能再按「真落了模型」把设置写成 on(界面却是 off)。
-                rifeAwaitingModel = false;
-                if (isChecked && !ceui.pixiv.ui.interpolate.RifeInterpolator.INSTANCE.isAvailable(mContext)) {
-                    // 模型缺失:不落盘、不弹 toast,先跳下载页,回来再结算。
-                    rifeAwaitingModel = true;
-                    android.content.Intent intent =
-                            new android.content.Intent(mContext, ceui.lisa.activities.TemplateActivity.class);
-                    intent.putExtra(ceui.lisa.activities.TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.RIFE_MODEL_DOWNLOAD.key);
-                    intent.putExtra("rife_model_name", ceui.pixiv.ui.interpolate.RifeModel.RIFE_V4_6.name());
-                    startActivity(intent);
-                    return;
-                }
-                applyUgoiraRifeEnable(isChecked);
-                Common.showToast(getString(R.string.string_428));
-            }
-        });
-        baseBind.ugoiraRifeEnableRela.setOnClickListener(v -> baseBind.ugoiraRifeEnable.performClick());
-
-        //动画(ugoira) 自动播放，默认开启。关闭后详情页不自动下载/播放，在图片中间显示「开始播放（下载）」按钮。
-        baseBind.ugoiraAutoPlay.setChecked(Shaft.sSettings.isAutoPlayUgoira());
-        baseBind.ugoiraAutoPlay.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                Shaft.sSettings.setAutoPlayUgoira(isChecked);
-                Common.showToast(getString(R.string.string_428));
-                Local.setSettings(Shaft.sSettings);
-            }
-        });
-        baseBind.ugoiraAutoPlayRela.setOnClickListener(v -> baseBind.ugoiraAutoPlay.performClick());
-
-        // 看图时保留状态栏(刘海/挖孔)区域（issue #724），默认关闭。
-        baseBind.keepStatusBarWhenViewImage.setChecked(Shaft.sSettings.isKeepStatusBarWhenViewImage());
-        baseBind.keepStatusBarWhenViewImage.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                Shaft.sSettings.setKeepStatusBarWhenViewImage(isChecked);
-                Common.showToast(getString(R.string.string_428));
-                Local.setSettings(Shaft.sSettings);
-            }
-        });
-        baseBind.keepStatusBarWhenViewImageRela.setOnClickListener(v ->
-                baseBind.keepStatusBarWhenViewImage.performClick());
-
-        // 二级详情大图默认以沉浸态进场（issue #1242），默认关闭。
-        baseBind.immersiveWhenViewImage.setChecked(Shaft.sSettings.isImmersiveWhenViewImage());
-        baseBind.immersiveWhenViewImage.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                Shaft.sSettings.setImmersiveWhenViewImage(isChecked);
-                Common.showToast(getString(R.string.string_428));
-                Local.setSettings(Shaft.sSettings);
-            }
-        });
-        baseBind.immersiveWhenViewImageRela.setOnClickListener(v ->
-                baseBind.immersiveWhenViewImage.performClick());
-
-        //插画二级详情保持屏幕常亮
-        baseBind.illustDetailKeepScreenOn.setChecked(Shaft.sSettings.isIllustDetailKeepScreenOn());
-        baseBind.illustDetailKeepScreenOn.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                Shaft.sSettings.setIllustDetailKeepScreenOn(isChecked);
-                Common.showToast(getString(R.string.string_428));
-                Local.setSettings(Shaft.sSettings);
-            }
-        });
-        baseBind.illustDetailKeepScreenOnRela.setOnClickListener(v ->
-                baseBind.illustDetailKeepScreenOn.performClick());
-
-        baseBind.comicReaderAutoRotateImage.setChecked(ComicReaderSettings.INSTANCE.getAutoRotateImage());
-        baseBind.comicReaderAutoRotateImage.setOnCheckedChangeListener((buttonView, isChecked) ->
-                ComicReaderSettings.INSTANCE.setAutoRotateImage(isChecked));
-        baseBind.comicReaderAutoRotateImageRela.setOnClickListener(v ->
-                baseBind.comicReaderAutoRotateImage.performClick());
-
-                // 大图 ↔ 详情页视口联动：不跟随 / 仅已展开时 / 自动展开并跟随（默认不跟随）
-        updateViewerViewportLinkLabel();
-        baseBind.viewerViewportLinkRela.setOnClickListener(v -> {
-            final int current = Shaft.sSettings.getViewerViewportLinkMode();
-            // 选项顺序必须与 Settings.VIEWER_VIEWPORT_LINK_* 的取值一致：which 直接当模式值用
-            String[] modeNames = new String[]{
-                    getString(R.string.viewer_viewport_link_none),
-                    getString(R.string.viewer_viewport_link_expanded_only),
-                    getString(R.string.viewer_viewport_link_auto_expand),
-            };
-            // 参考「插画大图长按行为」：行上只留标题与当前值，解释小字挪进弹窗，
-            // 标题栏右侧问号点开才展开；标题复用设置项名。
-            WitDialog.CheckableDialogBuilder builder =
-                    new WitDialog.CheckableDialogBuilder(mActivity)
-                            .setTitle(R.string.viewer_viewport_link_title)
-                            .setCheckedIndex(current)
-                            .setCollapsibleHint(getString(R.string.viewer_viewport_link_hint));
-            builder.addTitleAction(
-                    R.drawable.ic_help_outline_black_24dp,
-                    getString(R.string.viewer_viewport_link_help_desc),
-                    action -> builder.setHintExpanded(!builder.isHintExpanded()));
-            builder.addItems(modeNames, new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    if (which != current) {
-                        Shaft.sSettings.setViewerViewportLinkMode(which);
-                        Common.showToast(getString(R.string.string_428));
-                        Local.setSettings(Shaft.sSettings);
-                        updateViewerViewportLinkLabel();
-                    }
-                    dialog.dismiss();
-                }
-            }).show();
-        });
-
-        // 插画大图双击缩放行为：默认 / 三级 / 增量
-        updateDoubleTapZoomModeLabel();
-        baseBind.doubleTapZoomModeRela.setOnClickListener(v -> {
-            final int current = Shaft.sSettings.getDoubleTapZoomMode();
-            String[] doubleTapZoomModeNames = new String[]{
-                    getString(R.string.double_tap_zoom_mode_default),
-                    getString(R.string.double_tap_zoom_mode_three_level),
-                    getString(R.string.double_tap_zoom_mode_incremental),
-            };
-            new WitDialog.CheckableDialogBuilder(mActivity)
-                    .setCheckedIndex(current)
-                    .addItems(doubleTapZoomModeNames, new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            if (which != current) {
-                                Shaft.sSettings.setDoubleTapZoomMode(which);
-                                Common.showToast(getString(R.string.string_428));
-                                Local.setSettings(Shaft.sSettings);
-                                // 参考直连开关：切换模式时「缩放增量」行插入/移出，长按复位行随之平滑下移/上移。
-                                ViewGroup parent = (ViewGroup) baseBind.doubleTapZoomGroup.getParent();
-                                if (parent != null) {
-                                    TransitionManager.beginDelayedTransition(parent, new AutoTransition());
-                                }
-                                updateDoubleTapZoomModeLabel();
-                            }
-                            dialog.dismiss();
-                        }
-                    })
-                    .show();
-        });
-
-        // 大图长按行为：无 / 优先缩小一级 / 复原至最小，始终显示在双击缩放行为下方
-        updateLongPressBehaviorLabel();
-        baseBind.longPressBehaviorRela.setOnClickListener(v -> {
-            final int current = Shaft.sSettings.getLongPressBehavior();
-            // 选项顺序必须与 Settings.LONG_PRESS_BEHAVIOR_* 的取值一致：which 直接当行为值用
-            String[] longPressBehaviorNames = new String[]{
-                    getString(R.string.long_press_behavior_none),
-                    getString(R.string.long_press_behavior_shrink_one_level),
-                    getString(R.string.long_press_behavior_reset_min),
-            };
-            // 参考「GitHub 加速地址」：行上只留标题与当前值，解释小字挪进弹窗，
-            // 标题栏右侧问号点开才展开；标题复用设置项名。
-            WitDialog.CheckableDialogBuilder builder =
-                    new WitDialog.CheckableDialogBuilder(mActivity)
-                            .setTitle(R.string.long_press_behavior_title)
-                            .setCheckedIndex(current)
-                            .setCollapsibleHint(getString(R.string.long_press_behavior_hint));
-            builder.addTitleAction(
-                    R.drawable.ic_help_outline_black_24dp,
-                    getString(R.string.long_press_behavior_help_desc),
-                    action -> builder.setHintExpanded(!builder.isHintExpanded()));
-            builder.addItems(longPressBehaviorNames, new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    if (which != current) {
-                        Shaft.sSettings.setLongPressBehavior(which);
-                        Common.showToast(getString(R.string.string_428));
-                        Local.setSettings(Shaft.sSettings);
-                        updateLongPressBehaviorLabel();
-                    }
-                    dialog.dismiss();
-                }
-            }).show();
-        });
-
-        // 初始化缩放增量数值调节
-        setupCustomZoomScaleAdjust();
-    }
-
     private void updateArtworkV3FabPositionLabel() {
         int labelRes;
         switch (Shaft.sSettings.getArtworkV3FabPosition()) {
@@ -613,40 +419,10 @@ public class FragmentSettingsViewing extends SettingsPageFragment<FragmentSettin
     @Override
     public void onResume() {
         super.onResume();
-        settlePendingRifeToggle();
     }
 
-    /**
-     * 从 RIFE 模型下载页回来时结算开关:模型真落盘 → 这时才把设置落盘并弹「设置成功」;
-     * 没落盘(用户没下/下载失败/中途取消) → 设置保持关闭(不落盘),界面开关拨回 off 且不弹 toast。
-     */
-    private void settlePendingRifeToggle() {
-        if (!rifeAwaitingModel) {
-            return;
-        }
-        rifeAwaitingModel = false;
-        if (ceui.pixiv.ui.interpolate.RifeInterpolator.INSTANCE.isAvailable(mContext)) {
-            // 模型真落盘了,此刻才允许把「开关开」写进设置。
-            applyUgoiraRifeEnable(true);
-            Common.showToast(getString(R.string.string_428));
-            return;
-        }
         if (rootView != null) {
-            rifeSuppressToggleCallback = true;
-            baseBind.ugoiraRifeEnable.setChecked(false);
-            rifeSuppressToggleCallback = false;
         }
-    }
-
-    /**
-     * 落盘 RIFE 开关并让补帧产物缓存失效。只在「模型确已在位」或「明确关闭」时调用,
-     * 以保证设置里的 on 一定对应模型已落盘。
-     */
-    private void applyUgoiraRifeEnable(boolean enabled) {
-        // 落设备本地 MMKV(不进 Settings ⇒ 不进备份 / 云端),所以不需要 Local.setSettings。
-        ceui.pixiv.ui.interpolate.RifePrefs.setEnabled(enabled);
-        // 内存里可能记着旧变体(原速/补帧)的 gif,清掉,下次播放按新开关重取。
-        ceui.pixiv.ui.bulk.UgoiraEngine.invalidateAll();
     }
 
     @Override

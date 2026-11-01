@@ -15,8 +15,6 @@ import ceui.lisa.utils.Common
 import ceui.lisa.utils.Params
 import ceui.pixiv.api.Client
 import ceui.pixiv.utils.toUserMessage
-import ceui.pixiv.db.mirror.MirrorContentType
-import ceui.pixiv.db.mirror.trackBookmarkShelfVisit
 import ceui.pixiv.feeds.feedViewModels
 import ceui.pixiv.feeds.pixiv.pixivFeedSource
 import ceui.pixiv.ui.common.UserFeedFragment
@@ -118,7 +116,6 @@ class FollowUserFeedFragment : UserFeedFragment() {
      */
     override fun onResume() {
         super.onResume()
-        requireContext().trackBookmarkShelfVisit(userId, starType, MirrorContentType.USER)
     }
 
     /**

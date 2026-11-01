@@ -4,7 +4,6 @@ import android.content.Context
 import ceui.lisa.core.JavaAsync
 import ceui.lisa.database.AppDatabase
 import ceui.lisa.database.UserEntity
-import ceui.pixiv.db.mirror.BookmarkMirrorReadyBanner
 import ceui.pixiv.services.appServices
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -62,7 +61,6 @@ object AccountDataPurge {
                     app.appServices().bookmarkMirror.dropOwner(targetUid)
                 }
                 step("清除收藏库引导标记", targetUid) {
-                    BookmarkMirrorReadyBanner.forget(targetUid)
                 }
 
                 // 2. feeds 首屏快照：cacheKey 里含 uid 命名空间，整批删。

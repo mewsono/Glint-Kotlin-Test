@@ -1343,13 +1343,7 @@ public class MainActivity extends BaseActivity<ActivityCoverBinding>
             bottomBarAutoHide.setEnabled(Shaft.sSettings.isBottomBarHideOnScroll());
         }
         if (SessionManager.INSTANCE.isLoggedIn()) {
-            String referralCode = ceui.pixiv.ui.referral.ReferralPendingInvite.consume();
-            if (referralCode != null) {
-                Intent referral = new Intent(this, TemplateActivity.class);
-                referral.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.REFERRAL_PLAN.key);
-                referral.putExtra(ceui.pixiv.ui.referral.ReferralPlanFragment.ARG_CODE, referralCode);
-                startActivity(referral);
-            }
+
         }
     }
 

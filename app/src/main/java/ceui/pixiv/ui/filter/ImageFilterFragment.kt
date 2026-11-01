@@ -36,7 +36,10 @@ import ceui.lisa.activities.TemplateActivity
 import ceui.lisa.utils.Params
 import ceui.lisa.view.SeamlessCircularProgressIndicator
 import ceui.pixiv.api.model.Illust
-import ceui.pixiv.ui.library.LibraryFilterViews
+import ceui.pixiv.ui.common.ChoiceChips
+import ceui.pixiv.ui.common.ConnectedChoices
+import ceui.pixiv.ui.common.choiceChips
+import ceui.pixiv.ui.common.connectedChoices
 import ceui.pixiv.ui.navigation.TemplateRoute
 import ceui.pixiv.ui.v3.setupV3Toolbar
 import ceui.pixiv.witstudio.theme.V3Palette
@@ -84,14 +87,14 @@ class ImageFilterFragment : Fragment(R.layout.fragment_image_filter) {
     private lateinit var loadingCaption: TextView
     private lateinit var failedBox: LinearLayout
 
-    private lateinit var modeGroup: LibraryFilterViews.ChoiceGroup
+    private lateinit var modeGroup: ConnectedChoices
     private lateinit var resetButton: ImageView
     private lateinit var presetPanel: LinearLayout
     private lateinit var adjustPanel: LinearLayout
     private lateinit var presetScroll: HorizontalScrollView
     private val presetItems = ArrayList<PresetItem>()
     private lateinit var intensityRow: SliderRow
-    private lateinit var toolGroup: LibraryFilterViews.ChoiceGroup
+    private lateinit var toolGroup: ChoiceChips
     private lateinit var adjustRow: SliderRow
 
     private lateinit var shareButton: ImageView
@@ -270,7 +273,8 @@ class ImageFilterFragment : Fragment(R.layout.fragment_image_filter) {
 
     /** 「滤镜 | 调节」连通组 + 末端的重置。 */
     private fun buildModeRow(ctx: Context): View {
-        modeGroup = LibraryFilterViews(ctx).connectedGroup(
+        modeGroup = connectedChoices(
+            ctx,
             listOf(getString(R.string.image_filter_mode_presets), getString(R.string.image_filter_mode_adjust)),
         ) { model.setAdjustMode(it == 1) }
         resetButton = ImageView(ctx).apply {
@@ -337,7 +341,7 @@ class ImageFilterFragment : Fragment(R.layout.fragment_image_filter) {
 
     /** 调节：一行横滑的调节项胶囊（改过的带数值），下面是当前项的滑条。 */
     private fun buildAdjustPanel(ctx: Context) {
-        toolGroup = LibraryFilterViews(ctx).choiceChips(adjustLabels(model.state.value), scroll = true) {
+        toolGroup = choiceChips(ctx, adjustLabels(model.state.value), scroll = true) {
             model.setAdjustTool(it)
         }
         // 胶囊条的首尾留白对齐本页 16dp 的边。

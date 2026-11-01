@@ -41,7 +41,7 @@ import ceui.pixiv.ui.novel.reader.model.SearchHit
 import ceui.pixiv.ui.novel.reader.paginate.ChapterOutlineEntry
 import ceui.pixiv.ui.novel.reader.paginate.TranslationInserter
 import ceui.pixiv.ui.novel.reader.model.TranslationRole
-import ceui.pixiv.ui.translate.appTranslateTargetLang
+import ceui.pixiv.utils.appTranslateTargetLang
 import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers

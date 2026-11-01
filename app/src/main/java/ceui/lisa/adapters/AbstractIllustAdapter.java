@@ -61,8 +61,8 @@ public abstract class AbstractIllustAdapter<VH extends RecyclerView.ViewHolder>
             intent.putExtra("illust", allIllust);
             intent.putExtra("dataType", snapshotId != null ? "快照大图" : "二级详情");
             if (snapshotId != null) {
-                intent.putExtra(ceui.pixiv.snapshot.SnapshotManagerFragment.ARG_SNAPSHOT_ID, snapshotId);
-                intent.putExtra(ceui.pixiv.snapshot.SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, snapshotIsAuto);
+                intent.putExtra("snapshot_id", snapshotId);
+                intent.putExtra("snapshot_is_auto", snapshotIsAuto);
             }
             intent.putExtra("index", position);
             // 点击处的屏幕矩形:大图页(透明窗口)从这里展开进场,下拉收掉时缩回同一位置

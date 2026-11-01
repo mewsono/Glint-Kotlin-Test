@@ -29,7 +29,6 @@ import ceui.pixiv.feeds.FeedSource
 import ceui.pixiv.feeds.feedRenderer
 import ceui.pixiv.feeds.feedViewModels
 import ceui.pixiv.utils.ppppx
-import ceui.pixiv.ui.prime.TagShelfSkeletonView
 import ceui.pixiv.witstudio.dialog.WitDialog
 import ceui.pixiv.witstudio.dialog.WitDialogAction
 import ceui.pixiv.witstudio.theme.V3Palette
@@ -92,7 +91,6 @@ class PinnedTagsFragment : FeedFragment() {
     }
 
     override fun onCreateSkeletonView(layoutManager: RecyclerView.LayoutManager): FeedSkeletonView {
-        return TagShelfSkeletonView(requireContext(), style = TagShelfSkeletonView.Style.PINNED)
     }
 
     private fun pinnedTagRenderer() = feedRenderer<PinnedTagItemHolder, CellItemPinnedTagBinding>(

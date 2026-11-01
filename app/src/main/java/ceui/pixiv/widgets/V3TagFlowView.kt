@@ -22,7 +22,6 @@ import ceui.loxia.Tag
 import ceui.pixiv.ui.settings.CustomThemeColor
 import ceui.pixiv.ui.settings.ThemeColorCatalog
 import ceui.pixiv.ui.synonym.SynonymOperate
-import ceui.pixiv.ui.translate.translateTag
 import ceui.pixiv.utils.buildPinnedTagPreviewJson
 import ceui.pixiv.utils.pinnedTagTranslation
 import ceui.pixiv.witstudio.dialog.WitDialog
@@ -114,7 +113,6 @@ class V3TagFlowView @JvmOverloads constructor(
         actions.add {
             val owner = findViewTreeLifecycleOwner() ?: (context as? LifecycleOwner)
             if (owner != null) {
-                translateTag(context, owner.lifecycleScope, name)
             }
         }
         val pinHandler = onPinTag

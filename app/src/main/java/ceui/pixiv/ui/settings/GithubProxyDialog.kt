@@ -9,7 +9,6 @@ import ceui.lisa.activities.Shaft
 import ceui.lisa.http.GithubProxy
 import ceui.lisa.utils.Common
 import ceui.lisa.utils.Local
-import ceui.pixiv.sticker.StickerDownloadSource
 import ceui.pixiv.witstudio.dialog.WitDialog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineName
@@ -40,11 +39,12 @@ import java.util.concurrent.TimeUnit
  *  - **长期有效**：这个 release 的约定是「资源更新只追加新文件，已有 ZIP 不覆盖、不删除」，
  *    目录快照同样按快照 ID 命名（`<snapshot>-versions.json`），换一批也只是多一个新文件。
  *
- * 基址取 [StickerDownloadSource.RELEASE_BASE]（与真实下载共用），只有文件名是字面量。
+ * 基址取 [GITHUB_RELEASE_BASE]（与真实下载共用），只有文件名是字面量。
  */
 private const val PROBE_ASSET_NAME = "cab9ab822bf2e352-versions.json"
 
-private const val PROBE_URL: String = StickerDownloadSource.RELEASE_BASE + PROBE_ASSET_NAME
+private const val GITHUB_RELEASE_BASE = "https://github.com"
+private const val PROBE_URL: String = GITHUB_RELEASE_BASE + PROBE_ASSET_NAME
 
 /**
  * 「github加速地址」设置项的弹窗（标题与设置项同名）。

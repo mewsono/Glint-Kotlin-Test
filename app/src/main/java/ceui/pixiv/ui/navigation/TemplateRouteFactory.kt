@@ -124,12 +124,8 @@ object TemplateRouteFactory {
     @JvmStatic
     fun create(route: TemplateRoute, intent: Intent): Fragment =
         when (route) {
-            // 邀请码可能从 shaftintent://referral?code=… 带进来（落地页上「已经装了？直接
-            // 打开 App」那个按钮）。带进来就直接弹绑定框，省掉用户自己找入口。
-            TemplateRoute.REFERRAL_PLAN ->
-                ceui.pixiv.ui.referral.ReferralPlanFragment.newInstance(
-                    intent.getStringExtra(ceui.pixiv.ui.referral.ReferralPlanFragment.ARG_CODE),
-                )
+            // 邀请码落地页已随 `lean` 删除：旧链接（shaftintent://referral）落到登录页。
+            TemplateRoute.REFERRAL_PLAN -> FragmentLogin()
             TemplateRoute.LOGIN -> FragmentLogin()
             TemplateRoute.RELATED_ILLUSTS ->
                 RelatedIllustFeedFragment.newInstance(
@@ -329,71 +325,14 @@ object TemplateRouteFactory {
             TemplateRoute.WORKSPACE -> FragmentWorkSpace()
             TemplateRoute.PINNED_CONTENT -> PinnedTabsFragment()
             // key = 老 assets 文件名里那段 sha256，现在是 pixshaft-api 的路径参数。
-            TemplateRoute.MY_ILLUST_COLLECTION -> {
-                val wantsClassic = intent.getBooleanExtra(ceui.lisa.utils.Params.FLAG, false)
-                if (
-                    !wantsClassic &&
-                        shouldOpenBookmarkLibrary(ceui.pixiv.db.mirror.MirrorContentType.ILLUST)
-                ) {
-                    ceui.pixiv.ui.library.BookmarkLibraryFragment.newInstance()
-                } else {
-                    trackOwnBookmarkShelfVisit(ceui.pixiv.db.mirror.MirrorContentType.ILLUST)
-                    FragmentCollection.newInstance(0)
-                }
-            }
+            // 本地收藏库（BookmarkMirror 或 ui/library）已随 `lean` 删除，收藏入口直接进经典合集页。
+            TemplateRoute.MY_ILLUST_COLLECTION -> FragmentCollection.newInstance(0)
             // 小说收藏入口与插画侧同一条规则（理由见上面 MY_ILLUST_COLLECTION 的注释）。
-            TemplateRoute.MY_NOVEL_COLLECTION -> {
-                val wantsClassic = intent.getBooleanExtra(ceui.lisa.utils.Params.FLAG, false)
-                if (
-                    !wantsClassic &&
-                        shouldOpenBookmarkLibrary(ceui.pixiv.db.mirror.MirrorContentType.NOVEL)
-                ) {
-                    ceui.pixiv.ui.library.NovelBookmarkLibraryFragment.newInstance()
-                } else {
-                    trackOwnBookmarkShelfVisit(ceui.pixiv.db.mirror.MirrorContentType.NOVEL)
-                    FragmentCollection.newInstance(1)
-                }
-            }
-            // 本地库：按 contentType 分流到插画 / 小说 / 关注版（页面接线共用 BookmarkLibraryUi，
-            // 只是列表基类和卡片不同）。restrict 决定落在公开还是悄悄那个书架上。
-            TemplateRoute.BOOKMARK_LIBRARY -> {
-                val starType =
-                    intent.getStringExtra(ceui.lisa.utils.Params.STAR_TYPE)
-                        ?: ceui.lisa.utils.Params.TYPE_PUBLIC
-                val type =
-                    ceui.pixiv.db.mirror.MirrorContentType.of(
-                        intent.getIntExtra(
-                            ceui.pixiv.ui.library.BookmarkLibraryUi.ARG_CONTENT_TYPE,
-                            0,
-                        )
-                    ) ?: ceui.pixiv.db.mirror.MirrorContentType.ILLUST
-                when (type) {
-                    ceui.pixiv.db.mirror.MirrorContentType.ILLUST ->
-                        ceui.pixiv.ui.library.BookmarkLibraryFragment.newInstance(starType = starType)
-                    ceui.pixiv.db.mirror.MirrorContentType.NOVEL ->
-                        ceui.pixiv.ui.library.NovelBookmarkLibraryFragment.newInstance(
-                            starType = starType
-                        )
-                    ceui.pixiv.db.mirror.MirrorContentType.USER ->
-                        ceui.pixiv.ui.library.FollowingLibraryFragment.newInstance(
-                            starType = starType
-                        )
-                }
-            }
+            TemplateRoute.MY_NOVEL_COLLECTION -> FragmentCollection.newInstance(1)
+            // 本地收藏库（BookmarkMirror / ui/library）已随 `lean` 删除，这个入口退回经典合集页。
+            TemplateRoute.BOOKMARK_LIBRARY -> FragmentCollection.newInstance(0)
             TemplateRoute.WATCHLIST -> FragmentCollection.newInstance(3)
-            // 关注入口与收藏入口同一条规则（理由见上面 MY_ILLUST_COLLECTION 的注释）。
-            TemplateRoute.MY_FOLLOWING -> {
-                val wantsClassic = intent.getBooleanExtra(ceui.lisa.utils.Params.FLAG, false)
-                if (
-                    !wantsClassic &&
-                        shouldOpenBookmarkLibrary(ceui.pixiv.db.mirror.MirrorContentType.USER)
-                ) {
-                    ceui.pixiv.ui.library.FollowingLibraryFragment.newInstance()
-                } else {
-                    trackOwnBookmarkShelfVisit(ceui.pixiv.db.mirror.MirrorContentType.USER)
-                    FragmentCollection.newInstance(2)
-                }
-            }
+            TemplateRoute.MY_FOLLOWING -> FragmentCollection.newInstance(2)
             TemplateRoute.NOVEL_MARKERS -> NovelMarkersFeedFragment()
             // 设置 → 标签译文颜色 也复用本页，通过 extra 切成选择器模式。
             TemplateRoute.THEME_COLOR ->
