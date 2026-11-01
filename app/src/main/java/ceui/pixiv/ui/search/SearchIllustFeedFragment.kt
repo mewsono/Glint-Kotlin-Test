@@ -25,7 +25,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ceui.pixiv.ui.usage.observeNana7miQuotaNotice
 
 /**
  * 搜索「插画/漫画」tab（feeds 框架版，替代 legacy FragmentSearchIllust + SearchIllustRepo + IAdapter）。
@@ -63,8 +62,6 @@ class SearchIllustFeedFragment : IllustFeedFragment() {
             // 8 个必填参数先给 null，全部由 update(searchModel) 填；构造时 super 已建好 FilterMapper。
             SearchIllustRepo(
                 null, null, null, null, null, null, null, null,
-                nana7miOutbox = services.accountOnlineReportOutbox,
-                nana7miTelemetryService = services.nana7miSearchTelemetry,
                 remoteAppConfig = services.remoteAppConfig,
                 bookmarkMirror = services.bookmarkMirror,
             )
@@ -102,7 +99,6 @@ class SearchIllustFeedFragment : IllustFeedFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         // 撞热度排序额度时结果会静默降级成预览，这条提示是用户唯一能知道原因的地方。
-        observeNana7miQuotaNotice()
         viewLifecycleOwner.observeR18FilterChanges(requireContext(), ::syncItemVisibility)
         searchModel.nowGo.observe(viewLifecycleOwner) {
             // 普通查询仍只在「标签匹配」档响应（对齐 legacy）。命中本地策略时则所有

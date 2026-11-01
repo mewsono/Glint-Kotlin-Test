@@ -9,13 +9,8 @@ import ceui.lisa.model.ListNovel
 import ceui.lisa.repo.ViewerBookmarkState.withViewerBookmarkState
 import ceui.lisa.utils.PixivSearchParamUtil
 import ceui.lisa.viewmodel.SearchModel
-import ceui.pixiv.actions.AccountOnlineReportOutbox
 import ceui.pixiv.shaftapi.Nana7miPayload
-import ceui.pixiv.actions.Nana7miSearchTelemetry
-import ceui.pixiv.actions.observeFirstOrRun
-import ceui.pixiv.actions.trackOrRun
 import ceui.pixiv.config.RemoteAppConfig
-import ceui.pixiv.db.mirror.BookmarkMirrorService
 import ceui.pixiv.session.SessionManager
 import ceui.pixiv.ui.search.SortType
 import ceui.pixiv.ui.search.v3.DurationBucket
@@ -55,10 +50,7 @@ class SearchNovelRepo @JvmOverloads constructor(
      */
     private var durationBucket: String? = null,
     // 进程级服务，由构造方（Fragment）从 ServicesProvider 取出注入；Repo 自己不认识 Application。
-    private val nana7miOutbox: AccountOnlineReportOutbox,
-    private val nana7miTelemetryService: Nana7miSearchTelemetry,
     private val remoteAppConfig: RemoteAppConfig,
-    private val bookmarkMirror: BookmarkMirrorService,
 ) {
 
     /** 下一页游标（`next_url`），由调用方在翻页前写入；对齐旧 RemoteRepo 的同名属性。 */
@@ -70,9 +62,8 @@ class SearchNovelRepo @JvmOverloads constructor(
     // 靠它在客户端二次兜底，否则「喜欢！数」筛选会静默消失。
     private val filterMapper: NovelFilterMapper = NovelFilterMapper().enableFilterStarSize()
     @Volatile
-    private var nana7miSession = Nana7miAccountSession(nana7miOutbox)
+    private var nana7miSession = Nana7miAccountSession()
     @Volatile
-    private var nana7miTelemetry: Nana7miSearchTelemetry.Flow? = null
 
     /** 本轮首屏定下的缓存容忍度，翻页沿用——翻页期间跨了午夜也不该让同一轮列表换一套规则。 */
     @Volatile
@@ -83,9 +74,8 @@ class SearchNovelRepo @JvmOverloads constructor(
     /** 首屏请求。挂起点全在网络 / 借号里，调用方不必再切 IO。 */
     suspend fun initApi(): ListNovel {
         // A late completion from an older query must not overwrite the account for this query.
-        val currentNana7miSession = Nana7miAccountSession(nana7miOutbox)
+        val currentNana7miSession = Nana7miAccountSession()
         nana7miSession = currentNana7miSession
-        nana7miTelemetry = null
         val useBookmarkQuery = (bookmarkMin ?: 0) > 0 || (bookmarkMax ?: 0) > 0
         val keywordSuffix = if (useBookmarkQuery) "" else when {
             TextUtils.isEmpty(starSize) -> ""
@@ -146,23 +136,6 @@ class SearchNovelRepo @JvmOverloads constructor(
             return if (first.novels.isNullOrEmpty()) request(null) else first
         }
         val requesterUid = SessionManager.loggedInUid
-        val telemetry = if (BuildConfig.IS_LITE) null else when {
-            usePopularPreview -> nana7miTelemetryService.beginFlow(
-                requesterUid = requesterUid,
-                contentType = Nana7miSearchTelemetry.ContentType.NOVEL,
-                query = assembledKeyword,
-                initialRoute = Nana7miSearchTelemetry.Route.PREVIEW_DIRECT,
-                initialReason = if (selectedPopularPreview) "selected_preview" else "remote_disabled",
-            )
-            useBorrowedOfficial -> nana7miTelemetryService.beginFlow(
-                requesterUid = requesterUid,
-                contentType = Nana7miSearchTelemetry.ContentType.NOVEL,
-                query = assembledKeyword,
-                initialRoute = Nana7miSearchTelemetry.Route.BORROWED_OFFICIAL,
-            )
-            else -> null
-        }
-        nana7miTelemetry = telemetry
 
         val api = Client.appApi
 
@@ -220,12 +193,11 @@ class SearchNovelRepo @JvmOverloads constructor(
         }
 
         suspend fun fallbackPreview(reason: String): ListNovel {
-            telemetry?.fallback(reason)
             Timber.tag(NANA7MI_LOG_TAG).w(
                 "stage=route target=novel_popular_preview reason=%s",
                 reason,
             )
-            return telemetry.trackOrRun(Nana7miSearchTelemetry.Page.FIRST) {
+            return run {
                 try {
                     popularPreviewRequest().also { response ->
                         Timber.tag(NANA7MI_LOG_TAG).d(
@@ -250,12 +222,11 @@ class SearchNovelRepo @JvmOverloads constructor(
         // 仅喜欢数筛选（date 排序）的借号失败回退：排序保真走普通官方搜索（sort 此时必为
         // date_desc/date_asc，非会员发也合法），bookmark 参数被服务端忽略后无碍结果正确性。
         suspend fun fallbackPlain(reason: String): ListNovel {
-            telemetry?.fallback(reason)
             Timber.tag(NANA7MI_LOG_TAG).w(
                 "stage=route target=novel_plain_search reason=%s",
                 reason,
             )
-            return telemetry.trackOrRun(Nana7miSearchTelemetry.Page.FIRST) { plainSearchRequest() }
+            return run { plainSearchRequest() }
         }
 
         // 借号失败按诉求分流：热度类诉求回退热度预览；仅喜欢数筛选回退普通直连
@@ -263,12 +234,12 @@ class SearchNovelRepo @JvmOverloads constructor(
             if (wantsPremiumOnlySort) fallbackPreview(reason) else fallbackPlain(reason)
 
         if (usePopularPreview) {
-            return telemetry.observeFirstOrRun {
-                telemetry.trackOrRun(Nana7miSearchTelemetry.Page.FIRST) { popularPreviewRequest() }
+            return run {
+                run { popularPreviewRequest() }
             }
         }
         if (!useBorrowedOfficial) {
-            return telemetry.observeFirstOrRun { plainSearchRequest() }
+            return run { plainSearchRequest() }
         }
 
         // 借号之前先问 pixshaft（见 SearchIllustRepo）。key 覆盖 searchNovelWithAuth 的每个参数，
@@ -317,19 +288,13 @@ class SearchNovelRepo @JvmOverloads constructor(
             if (borrowed == null || borrowed.expired) {
                 return@run fallbackAfterBorrowFailure(currentNana7miSession.resultLabel(result))
             }
-            telemetry?.borrowed(borrowed.uid)
             Timber.tag(NANA7MI_LOG_TAG).d(
                 "stage=route target=novel_official_search account_uid=%d sort=%s",
                 borrowed.uid,
                 sortType,
             )
             try {
-                telemetry.trackOrRun(
-                    page = Nana7miSearchTelemetry.Page.FIRST,
-                    route = Nana7miSearchTelemetry.Route.BORROWED_OFFICIAL,
-                    borrowedUid = borrowed.uid,
-                    eventId = firstRequestId,
-                ) {
+                run {
                     currentNana7miSession.requestWithRefresh(
                         initial = borrowed,
                         stage = "novel_official_search",
@@ -365,7 +330,7 @@ class SearchNovelRepo @JvmOverloads constructor(
                         }
                     }.also { page ->
                         Nana7miSearchCache.store(cacheKind, cacheKey, page, "novel_official_search")
-                    }.withViewerBookmarkState(bookmarkMirror)
+                    }.withViewerBookmarkState()
                 }
             } catch (ce: CancellationException) {
                 throw ce
@@ -390,18 +355,11 @@ class SearchNovelRepo @JvmOverloads constructor(
                     firstRequestId,
                     requestIdProtocolEnabled,
                 )
-                telemetry?.cacheHit()
-                telemetry.observeFirstOrRun {
-                    telemetry.trackOrRun(
-                        page = Nana7miSearchTelemetry.Page.FIRST,
-                        route = Nana7miSearchTelemetry.Route.CACHE_HIT,
-                        borrowedUid = null,
-                        reason = null,
-                        eventId = firstRequestId,
-                    ) { cached.withViewerBookmarkState(bookmarkMirror) }
+                run {
+                    run { cached.withViewerBookmarkState() }
                 }
             },
-        ) { telemetry.observeFirstOrRun { borrowedFlow() } }
+        ) { run { borrowedFlow() } }
     }
 
     /**
@@ -422,7 +380,6 @@ class SearchNovelRepo @JvmOverloads constructor(
         val session = nana7miSession
         val borrowed = session.payload
         val cursorFromCache = session.cursorFromCache
-        val telemetry = nana7miTelemetry
         // Capture the cursor together with the session before this request waits for the
         // process-wide permit; a newer first page may otherwise replace nextUrl.
         val nextPageUrl = nextUrl
@@ -431,7 +388,7 @@ class SearchNovelRepo @JvmOverloads constructor(
             return endBorrowedPagination("already_lost")
         }
         if (borrowed == null && !cursorFromCache) {
-            return telemetry.trackOrRun(Nana7miSearchTelemetry.Page.NEXT) {
+            return run {
                 api.getNextNovel(nextPageUrl)
             }
         }
@@ -453,13 +410,7 @@ class SearchNovelRepo @JvmOverloads constructor(
             stage = "novel_official_search_next",
             hit = { cached ->
                 // 命中的翻页同样上报（route=cache_hit），服务端已按一次翻页计费。
-                telemetry.trackOrRun(
-                    page = Nana7miSearchTelemetry.Page.NEXT,
-                    route = Nana7miSearchTelemetry.Route.CACHE_HIT,
-                    borrowedUid = null,
-                    reason = null,
-                    eventId = nextRequestId,
-                ) { cached.withViewerBookmarkState(bookmarkMirror) }
+                run { cached.withViewerBookmarkState() }
             },
         ) {
             Nana7miSearchSerial.run("novel_next") { lease ->
@@ -480,12 +431,7 @@ class SearchNovelRepo @JvmOverloads constructor(
                         "stage=novel_official_search_next event=request account_uid=%d",
                         current.uid,
                     )
-                    telemetry.trackOrRun(
-                        page = Nana7miSearchTelemetry.Page.NEXT,
-                        route = Nana7miSearchTelemetry.Route.BORROWED_OFFICIAL,
-                        borrowedUid = current.uid,
-                        eventId = nextRequestId,
-                    ) {
+                    run {
                         session.requestWithRefresh(
                             initial = current,
                             stage = "novel_official_search_next",
@@ -498,7 +444,7 @@ class SearchNovelRepo @JvmOverloads constructor(
                             api.getNextNovelWithAuth(authorization, nextPageUrl)
                         }.also { page ->
                             Nana7miSearchCache.store(cacheKind, cacheKey, page, "novel_official_search_next")
-                        }.withViewerBookmarkState(bookmarkMirror)
+                        }.withViewerBookmarkState()
                     }
                 } catch (ce: CancellationException) {
                     throw ce

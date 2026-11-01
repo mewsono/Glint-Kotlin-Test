@@ -46,7 +46,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ceui.pixiv.ui.usage.observeNana7miQuotaNotice
 import ceui.pixiv.ui.navigation.TemplateRoute
 
 /**
@@ -82,8 +81,6 @@ class SearchNovelFeedFragment : NovelFeedFragment() {
         SearchNovelFeedSource(searchModel, loadedSpec) {
             SearchNovelRepo(
                 null, null, null, null, null, null, null, null,
-                nana7miOutbox = services.accountOnlineReportOutbox,
-                nana7miTelemetryService = services.nana7miSearchTelemetry,
                 remoteAppConfig = services.remoteAppConfig,
                 bookmarkMirror = services.bookmarkMirror,
             )
@@ -132,7 +129,6 @@ class SearchNovelFeedFragment : NovelFeedFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         // 撞热度排序额度时结果会静默降级成预览，这条提示是用户唯一能知道原因的地方。
-        observeNana7miQuotaNotice()
         viewLifecycleOwner.observeR18FilterChanges(requireContext(), ::syncItemVisibility)
         searchModel.nowGo.observe(viewLifecycleOwner) {
             // 命中本地策略时不受普通搜索类型限制：小说页也要清空旧结果。

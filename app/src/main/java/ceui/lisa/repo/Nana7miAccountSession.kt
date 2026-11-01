@@ -6,8 +6,6 @@ import ceui.loxia.User
 import ceui.pixiv.shaftapi.Nana7miPayload
 import ceui.pixiv.shaftapi.Nana7miResult
 import ceui.pixiv.shaftapi.fetchNana7mi
-import ceui.pixiv.ui.usage.Nana7miQuotaNotice
-import ceui.pixiv.actions.AccountOnlineReportOutbox
 import ceui.pixiv.login.InvalidRefreshTokenException
 import ceui.pixiv.login.PixivLogin
 import ceui.pixiv.login.PixivOAuthUser
@@ -28,10 +26,7 @@ import java.io.IOException
  * header. Both illustration and novel search share this class so first-page, pagination, refresh,
  * and durable re-report behavior cannot drift apart.
  */
-internal class Nana7miAccountSession(
-    /** Durable outbox for the refreshed-token / invalid-token reports this session emits. */
-    private val outbox: AccountOnlineReportOutbox,
-) {
+internal class Nana7miAccountSession() {
 
     @Volatile
     var payload: Nana7miPayload? = null
@@ -132,11 +127,6 @@ internal class Nana7miAccountSession(
             }
         }
         logFetchResult(requesterUid, fetched)
-        if (fetched is Nana7miResult.RateLimited) {
-            // 配额拒绝对用户是可见事实（结果会静默降级成热度预览），限流拒绝不是。
-            // 这里是插画和小说两个搜索仓库共用的唯一借号入口，报在这里就不用各报一遍。
-            Nana7miQuotaNotice.report(fetched)
-        }
         if (fetched is Nana7miResult.NotPremium) {
             // 服务端派发池只收 is_premium = 1，走到这里说明那一行的分类和 blob 对不上。把这份
             // AccountResponse 原样报回去，saveOnline 会按 blob 里的真实会员状态重新分类并停止派发。
@@ -258,19 +248,12 @@ internal class Nana7miAccountSession(
      * anything that is not premium, so no separate endpoint is involved.
      */
     private suspend fun reportNotPremium(result: Nana7miResult.NotPremium, stage: String) {
-        val persisted = withContext(NonCancellable) {
-            outbox.persistOnline(result.uid, result.account)
-        }
-        val reportResult = if (persisted) {
-            outbox.attemptOnline(result.uid).name.lowercase()
-        } else {
-            "persist_failed"
-        }
+        // `lean` 删掉了上报服务（AccountOnlineReportOutbox），没有渠道把「这个号已掉会员」交回
+        // 服务端，只能记日志：本进程内这个号不再被当作可用借号，调用方按既有 fallback 退回。
         Timber.tag(LOG_TAG).w(
-            "stage=premium result=not_premium account_uid=%d source=%s report=%s",
+            "stage=premium result=not_premium account_uid=%d source=%s report=disabled",
             result.uid,
             stage,
-            reportResult,
         )
     }
 
@@ -288,141 +271,18 @@ internal class Nana7miAccountSession(
 
     /** Refresh one borrowed account without touching the app's logged-in account. */
     private suspend fun renew(stale: Nana7miPayload, reason: String): Nana7miResult {
-        Timber.tag(LOG_TAG).d(
-            "stage=expiry action=renew account_uid=%d reason=%s expired_at=%d overdue_ms=%d",
+        // `classic` 在这里用借来的 refresh_token 换新 token，并把新 token 交给上报服务写回服务端 ——
+        // Pixiv 轮换 refresh_token 后旧 token 立刻作废，所以「不交回去」等于把公共借号池刷坏。
+        // `lean` 没有上报服务，正确的选择是不再续期：这个号当场判失效，调用方按既有 fallback
+        // 路径退回热度预览 / 普通直连搜索。要恢复续期，得先把上报通道加回来。
+        Timber.tag(LOG_TAG).w(
+            "stage=expiry action=renew_disabled account_uid=%d reason=%s",
             stale.uid,
             reason,
-            stale.expiresAt,
-            (System.currentTimeMillis() - stale.expiresAt).coerceAtLeast(0L),
         )
-        val refreshToken = stale.account.refresh_token?.takeIf { it.isNotBlank() }
-        if (refreshToken == null) {
-            Timber.tag(LOG_TAG).e(
-                "stage=validate result=failure account_uid=%d reason=missing_refresh_token",
-                stale.uid,
-            )
-            return Nana7miResult.InvalidResponse(
-                IllegalStateException("nana7mi refresh_token missing"),
-            )
-        }
-        val uid = stale.account.user?.id?.takeIf { it > 0L }
-        if (uid == null) {
-            Timber.tag(LOG_TAG).e(
-                "stage=validate result=failure payload_uid=%d reason=missing_account_uid",
-                stale.uid,
-            )
-            return Nana7miResult.InvalidResponse(
-                IllegalStateException("nana7mi account uid missing"),
-            )
-        }
-
-        val oauth = try {
-            Timber.tag(LOG_TAG).d(
-                "stage=refresh event=request account_uid=%d reason=%s",
-                uid,
-                reason,
-            )
-            PixivLogin.refreshTokenBlocking(refreshToken)
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (error: Exception) {
-            if (error is InvalidRefreshTokenException) {
-                val persisted = withContext(NonCancellable) {
-                    outbox.persistInvalidRefreshToken(uid, refreshToken)
-                }
-                Timber.tag(LOG_TAG).w(
-                    error,
-                    "stage=refresh result=invalid_refresh_token account_uid=%d reason=%s invalidation_queued=%s",
-                    uid,
-                    reason,
-                    persisted,
-                )
-                return Nana7miResult.InvalidResponse(error)
-            }
-            Timber.tag(LOG_TAG).w(
-                error,
-                "stage=refresh result=failure account_uid=%d reason=%s error_type=%s",
-                uid,
-                reason,
-                error.javaClass.simpleName,
-            )
-            return Nana7miResult.InvalidResponse(error)
-        }
-
-        Timber.tag(LOG_TAG).d(
-            "stage=refresh result=success account_uid=%d reason=%s expires_in_seconds=%d",
-            uid,
-            reason,
-            oauth.expiresIn,
+        return Nana7miResult.InvalidResponse(
+            IllegalStateException("borrowed account renewal disabled: no report channel"),
         )
-        // Held rather than inlined: the NotPremium branch further down tests this same value,
-        // and it must test `== false` (an explicit "not a member") rather than falsiness —
-        // a null here means pixiv said nothing and the account must stay in the pool.
-        val freshPremium = freshMembershipOf(oauth.user, uid)
-        val refreshedAccount = stale.account.copy(
-            access_token = oauth.accessToken,
-            refresh_token = oauth.refreshToken,
-            expires_in = oauth.expiresIn,
-            user = mergeMembership(stored = stale.account.user, fresh = freshPremium),
-        )
-        val updatedAt = System.currentTimeMillis()
-        val refreshedPayload = stale.copy(
-            account = refreshedAccount,
-            updatedAt = updatedAt,
-            expiresAt = updatedAt + VALID_MS,
-            expired = false,
-        )
-
-        // Persist before the cancellable network attempt. Once Pixiv rotates a refresh token,
-        // returning Success is only safe if either the server or this global outbox owns the new one.
-        val persisted = withContext(NonCancellable) {
-            outbox.persistOnline(uid, refreshedAccount)
-        }
-        if (!persisted) {
-            Timber.tag(LOG_TAG).e(
-                "stage=online_report result=persist_failed account_uid=%d reason=%s",
-                uid,
-                reason,
-            )
-            return Nana7miResult.InvalidResponse(
-                IllegalStateException("refreshed AccountResponse could not be persisted"),
-            )
-        }
-        Timber.tag(LOG_TAG).d(
-            "stage=online_report event=request account_uid=%d reason=%s",
-            uid,
-            reason,
-        )
-        val reportResult = outbox.attemptOnline(uid)
-        Timber.tag(LOG_TAG).d(
-            "stage=online_report result=%s account_uid=%d reason=%s",
-            reportResult.name.lowercase(),
-            uid,
-            reason,
-        )
-        if (freshPremium == false) {
-            // 上面那次 online 上报本身就是「通知服务端」：saveOnline 读 user.is_premium，非 true 一律
-            // stmtPauseDispatch 移出派发池（borrow_count 保留，用户续费后再次上报会自动恢复）。
-            // 刷新出来的新 token 也一并交出去了，所以这个号不会被我们刷坏，只是不再被借出。
-            Timber.tag(LOG_TAG).w(
-                "stage=premium result=not_premium account_uid=%d reason=%s report=%s",
-                uid,
-                reason,
-                reportResult.name.lowercase(),
-            )
-            return Nana7miResult.NotPremium(uid, refreshedAccount)
-        }
-        // stage=expiry, not stage=flow: renew() also runs mid-pagination, and the illustration and
-        // novel flows own their own stage names ("flow" / "novel_flow"). Closing here with a flow
-        // event mislabeled every novel renewal and made "ready" show up in the middle of a page
-        // request. This pairs with the "action=renew" line that opened the renewal instead.
-        Timber.tag(LOG_TAG).d(
-            "stage=expiry result=renewed account_uid=%d updated_at=%d expires_at=%d",
-            uid,
-            refreshedPayload.updatedAt,
-            refreshedPayload.expiresAt,
-        )
-        return Nana7miResult.Success(refreshedPayload)
     }
 
     private fun isPixivOAuthExpired(error: Throwable): Boolean {

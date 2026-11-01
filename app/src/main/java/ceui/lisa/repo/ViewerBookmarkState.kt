@@ -7,8 +7,6 @@ import ceui.loxia.Novel
 import ceui.pixiv.api.model.Illust
 import ceui.pixiv.cache.ObjectPool
 import ceui.pixiv.cache.withoutViewerState
-import ceui.pixiv.db.mirror.BookmarkMirrorService
-import ceui.pixiv.db.mirror.MirrorContentType
 
 /**
  * 搜索页出仓前的收藏态修正（#1063）。
@@ -19,43 +17,39 @@ import ceui.pixiv.db.mirror.MirrorContentType
  * Pixiv 没有按 id 批量查收藏态的接口，逐条打 detail 又太贵，所以这里只做确定正确的事：
  *  1. 进程内 [ObjectPool] 已经确认过、且标记为「当前用户视角」的（详情页、自己的收藏页 /
  *     feed 合过池的）沿用；被标成不可信的不算（见 [ObjectPool] 的「viewer 态可信度」）；
- *  2. 池里没有、但本地收藏镜像里有的，就是收藏了（冷启动后也成立）；
- *  3. 其余一律置 null（「不知道」）。镜像可能没回填完、或漏了别的设备刚做的收藏，
- *     所以「镜像里没有」不能当成未收藏。UI 把 null 渲染成未收藏；合池时 null 属于空值，
+ *  2. 其余一律置 null（「不知道」）。UI 把 null 渲染成未收藏；合池时 null 属于空值，
  *     不会盖掉池里已有的真值（见 ObjectPool.mergeKeepingExisting），也就不会再把错误值灌进池里。
+ *
+ * `lean` 删掉了本地收藏镜像（CLEANUP_MANIFEST.md §3.3），所以这里只剩「池里可信值」一条来源：
+ * 「镜像里没有」本来就不能当成未收藏，少这一条只会让更多条目落回 null，不会把红心翻成灰心。
  *
  * 回退到普通直发的页（popular-preview / 普通搜索）本来就是当前用户视角，**不要**经这里。
  */
 internal object ViewerBookmarkState {
 
-    suspend fun ListIllust.withViewerBookmarkState(mirror: BookmarkMirrorService): ListIllust {
+    fun ListIllust.withViewerBookmarkState(): ListIllust {
         val source = illusts ?: return this
-        val mirrored = mirror.bookmarkedAmong(MirrorContentType.ILLUST, source.map { it.id })
-        // 收藏态在这里按「池里可信值 → 镜像」只升不降地重算，关注态一律清成未知 —— 借号账号
-        // 关注没关注这个作者，跟当前用户没有关系。出仓的 bean 已经不带别人的状态，合池时 null
-        // 不会盖掉池里的值，详情页对 null 字段也会自己问镜像，所以**不**给池条目打不可信标记：
-        // 池里那条可能是用户刚在本会话收藏 / 详情页确认过的权威 true，标成不可信会让详情页的
-        // 镜像校正（镜像没就绪时）把它抹回 null。
+        // 收藏态只按「池里可信值」重算，关注态一律清成未知 —— 借号账号关注没关注这个作者，
+        // 跟当前用户没有关系。出仓的 bean 不带别人的状态，合池时 null 不会盖掉池里的值。
         return ListIllust().also { out ->
             out.setNext_url(nextUrl)
             out.illusts = source.map { bean ->
                 bean.copy(
-                    is_bookmarked = knownIllustBookmark(bean.id) ?: true.takeIf { bean.id in mirrored },
+                    is_bookmarked = knownIllustBookmark(bean.id),
                     user = bean.user?.withoutViewerState(),
                 )
             }
         }
     }
 
-    suspend fun ListNovel.withViewerBookmarkState(mirror: BookmarkMirrorService): ListNovel {
+    fun ListNovel.withViewerBookmarkState(): ListNovel {
         val source = novels ?: return this
-        val mirrored = mirror.bookmarkedAmong(MirrorContentType.NOVEL, source.map { it.id })
         return ListNovel().also { out ->
             out.setNext_url(nextUrl)
             out.ranking_novels = ranking_novels
             out.novels = source.map { novel ->
                 novel.copy(
-                    is_bookmarked = knownNovelBookmark(novel.id) ?: true.takeIf { novel.id in mirrored },
+                    is_bookmarked = knownNovelBookmark(novel.id),
                     user = novel.user?.withoutViewerState(),
                 )
             }

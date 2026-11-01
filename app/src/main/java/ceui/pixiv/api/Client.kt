@@ -116,14 +116,6 @@ object Client {
         clientManager.createPixshaftService(PixshaftApi::class.java)
     }
 
-    /**
-     * Media metadata and short-lived COS upload/download authorisation. Object bytes do not pass
-     * through the Tokyo API.
-     */
-    val plazaAPI: ceui.pixiv.plaza.PlazaApi by lazy {
-        clientManager.createMediaService(ceui.pixiv.plaza.PlazaApi::class.java)
-    }
-
     val mediaAPI: MediaApi by lazy {
         clientManager.createMediaService(MediaApi::class.java)
     }
@@ -207,21 +199,6 @@ class ClientManager {
 
         RequestLogInterceptor.installOn(okhttpClientBuilder, "Net/AppApi")
         okhttpClientBuilder.addInterceptor(HeaderInterceptor())
-        // Between Header and TokenFetcher on purpose: the borrowed-account marker is only still on
-        // the request here (see OwnSearchLoadInterceptor). Lite never lends its account, so there
-        // is no load to report.
-        if (!BuildConfig.IS_LITE) {
-            okhttpClientBuilder.addInterceptor(
-                OwnSearchLoadInterceptor(
-                    ownerUid = { SessionManager.loggedInUid },
-                    isPremium = { SessionManager.isPremium },
-                    report = { uid, contentType, page, httpStatus ->
-                        Shaft.getContext().appServices().nana7miSearchTelemetry
-                            .reportOwnRequest(uid, contentType, page, httpStatus)
-                    },
-                ),
-            )
-        }
         okhttpClientBuilder.addInterceptor(TokenFetcherInterceptor())
         applyAppApiProxy(okhttpClientBuilder)
         applyDirectConnect(okhttpClientBuilder)
