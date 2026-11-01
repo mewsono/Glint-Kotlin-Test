@@ -292,7 +292,6 @@ object SettingsCatalog {
             VIEWING.key -> FragmentSettingsViewing()
             BOOKMARKS.key -> FragmentSettingsBookmarks()
             DOWNLOAD.key -> FragmentSettingsDownload()
-            AI.key -> FragmentSettingsAi()
             DATA.key -> FragmentSettingsData()
             EXPERIMENTAL.key -> FragmentSettingsExperimental()
             else -> FragmentSettingsHub()

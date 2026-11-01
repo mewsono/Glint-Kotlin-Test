@@ -56,10 +56,7 @@ object AccountDataPurge {
             val db = AppDatabase.getAppDatabase(app)
 
             if (purgeLocalData) {
-                // 1. 收藏 / 关注镜像：先摘运行态与数据，再清「补齐了」那条一次性引导的标记。
-                step("停用收藏镜像", targetUid) {
-                    app.appServices().bookmarkMirror.dropOwner(targetUid)
-                }
+                // 1. 收藏镜像随 `lean` 删除，这里没有运行态要停，只剩引导标记要清。
                 step("清除收藏库引导标记", targetUid) {
                 }
 

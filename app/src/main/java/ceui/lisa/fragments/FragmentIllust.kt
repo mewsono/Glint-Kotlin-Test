@@ -462,18 +462,13 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
         setupStats(illust)
         // 「收藏数」入口原来接在 setupActionButtons() 里 —— 但那个 view 现在住在信息区，
         // 只能在 inflate 之后接。跟着信息区一起延后，判据一致。
-        if (isSnapshotMode) {
-            // 快照页只读：这个入口也拦掉（正常路径下 applySnapshotReadOnlyOverrides 会拦一次，
-            // 这里兜的是「视图还没 RESUMED、信息区被延后」那一档）。
-            illustLikeView.setOnClickListener { snapshotUnsupportedToast() }
-        } else {
-            illustLikeView.setOnClick {
-                val intent = Intent(mContext, TemplateActivity::class.java)
-                intent.putExtra(Params.CONTENT, illust)
-                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.ILLUST_LIKERS.key)
-                startActivity(intent)
-            }
+        illustLikeView.setOnClick {
+            val intent = Intent(mContext, TemplateActivity::class.java)
+            intent.putExtra(Params.CONTENT, illust)
+            intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.ILLUST_LIKERS.key)
+            startActivity(intent)
         }
+    
     }
 
     private fun updateIllust(illust: Illust) {
@@ -579,17 +574,7 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
                 true
             }
         }
-        if (isSnapshotMode) {
-            // 快照只读：溢出菜单只保留复制链接 / 分享首图 / 画质增强 / 智能抠图。
-            intArrayOf(
-                R.id.action_share,
-                R.id.action_dislike,
-                R.id.action_mute_illust,
-                R.id.action_flag_illust,
-                R.id.action_show_original,
-                R.id.action_snapshot,
-            ).forEach { id -> baseBind.toolbar.menu?.findItem(id)?.isVisible = false }
-        }
+
         // 动图(ugoira)的 original 是 zip,加载原图/画质增强/抠图都没法处理,隐藏这几项(对齐 V3 详情页)。
         if (illust.isGif()) {
             baseBind.toolbar.menu?.findItem(R.id.action_ai_upscale)?.isVisible = false
@@ -699,19 +684,7 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
             renderedSynonymEnabled = synonymEnabled
             synonymMatchView.setWorkTags(tags)
         }
-        if (isSnapshotMode) {
-            flow.overflowActionText = null
-            flow.onOverflowClick = null
-            flow.onPinTag = null
-            flow.onViewAuthorWorks = null
-            flow.setOnItemClickListener { _, _ -> snapshotUnsupportedToast() }
-            flow.setOnItemLongClickListener { item, _ ->
-                if (item.name.isNotEmpty()) Common.copy(mContext, item.name)
-                true
-            }
-            flow.setJavaTags(tags)
-            return
-        }
+
         flow.overflowActionText = "+ " + getString(R.string.work_tag_edit_entry)
         flow.onOverflowClick = { TagEditSheet.show(childFragmentManager, illust.id.toLong()) }
         flow.setJavaTags(tags)
@@ -1104,13 +1077,8 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
             } else {
                 val adapter = IllustAdapter(mActivity, this@FragmentIllust, illust, recyHeight, false)
                 baseBind.recyclerView.adapter = adapter
-                if (isSnapshotMode) {
-                    adapter.setSnapshotId(snapshotId)
-                    adapter.setSnapshotIsAuto(snapshotIsAuto)
-                    applySnapshotLocalPages(adapter)
-                } else {
-                    vm.pageDimensions.value?.let { adapter.seedPageDimensions(it) }
-                }
+                vm.pageDimensions.value?.let { adapter.seedPageDimensions(it) }
+            
             }
         } else {
             // 不重建,但 bean 实例可能已被池的 merge 换成新的一份(收藏态就在里面)。

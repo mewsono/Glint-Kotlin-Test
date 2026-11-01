@@ -323,7 +323,7 @@ object PixivActions {
             Timber.tag(TAG).w("bindAccountOnline skipped, invalid uid=%d", uid)
             return
         }
-        Shaft.getContext().appServices().accountOnlineReportOutbox.enqueueOnline(uid, accountResponse)
+        // 借号池上报随 `lean` 删除：这里不再往服务端写任何账号在线状态。
     }
 
     /**

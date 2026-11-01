@@ -11,7 +11,6 @@ import ceui.pixiv.auth.AuthSessionManager
 import ceui.pixiv.auth.MediaAuthSessionManager
 import ceui.pixiv.network.FanboxHeaderInterceptor
 import ceui.pixiv.network.HeaderInterceptor
-import ceui.pixiv.network.OwnSearchLoadInterceptor
 import ceui.pixiv.network.RequestLogInterceptor
 import ceui.pixiv.network.TokenFetcherInterceptor
 import ceui.pixiv.network.WebHeaderInterceptor

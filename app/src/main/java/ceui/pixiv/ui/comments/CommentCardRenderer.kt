@@ -41,7 +41,7 @@ fun CommentsFragment.commentCardRenderer(): FeedRenderer<CommentFeedItem, CellCo
         inflate = CellCommentBinding::inflate,
         create = { cell ->
             val binding = cell.binding
-            if (!isSnapshotMode) {
+            if (true) {
                 binding.root.setOnClickListener {
                     cell.itemOrNull?.let { item ->
                         findActionReceiverOrNull<CommentActionReceiver>()?.onClickComment(item.comment)
@@ -157,11 +157,11 @@ fun CommentsFragment.commentCardRenderer(): FeedRenderer<CommentFeedItem, CellCo
             pillIcon(context, R.drawable.ic_delete_black_24dp, danger), null, null, null
         )
 
-        binding.reply.isVisible = !isSnapshotMode && SessionManager.loggedInUid != comment.user.id
-        binding.delete.isVisible = !isSnapshotMode && SessionManager.loggedInUid == comment.user.id
+        binding.reply.isVisible = SessionManager.loggedInUid != comment.user.id
+        binding.delete.isVisible = SessionManager.loggedInUid == comment.user.id
         // A locally sent reply can be shown before the pre-existing server thread is expanded.
         // Keep the affordance until that complete thread has actually been fetched.
-        binding.showReply.isVisible = !isSnapshotMode && comment.has_replies == true && !item.repliesLoaded
+        binding.showReply.isVisible = comment.has_replies == true && !item.repliesLoaded
 
         bindChildComments(cell)
     }
@@ -193,7 +193,7 @@ private fun CommentsFragment.bindChildComments(cell: FeedCell<CommentFeedItem, C
                 binding.childCommentsList.layoutManager = LinearLayoutManager(context)
                 binding.childCommentsList.adapter = it
             }
-        childAdapter.readOnly = isSnapshotMode
+        childAdapter.readOnly = false
         childAdapter.pendingTranslationReveals = pendingTranslationReveals
         childAdapter.submitList(item.childComments.map { childComment ->
             ChildCommentItem(

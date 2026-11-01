@@ -29,6 +29,7 @@ import ceui.lisa.fragments.FragmentWorkSpace
 import ceui.lisa.fragments.SettingsCatalog
 import ceui.lisa.fragments.StreetMainFragment
 import ceui.lisa.utils.Params
+import ceui.loxia.Novel
 import ceui.pixiv.api.model.Illust
 import ceui.pixiv.api.model.ObjectType
 import ceui.pixiv.cache.ObjectPool
@@ -87,9 +88,7 @@ import ceui.pixiv.ui.recommend.UgoiraRankFragment
 import ceui.pixiv.ui.recommend.ViewRankFragment
 import ceui.pixiv.ui.recommend.WallpaperRankFragment
 import ceui.pixiv.ui.recommend.YearRankFragment
-import ceui.pixiv.ui.settings.AiTranslateSettingsFragment
 import ceui.pixiv.ui.settings.Aria2SettingsFragment
-import ceui.pixiv.ui.settings.WebDavSettingsFragment
 import ceui.pixiv.ui.settings.DownloadPathSettingsFragment
 import ceui.pixiv.ui.settings.NovelHeaderSettingsFragment
 import ceui.pixiv.ui.settings.ThemeColorFeedFragment
@@ -161,7 +160,25 @@ object TemplateRouteFactory {
                         Uri::class.java,
                     ),
                 )
-            TemplateRoute.COMMENTS -> commentsFragment(intent)
+            // 评论区：插画/漫画入口塞 ILLUST_ID，小说入口塞 NOVEL_ID。作者 id 不在 extra 里，
+            // 从对象池取，取不到就给 0（只影响自己发的评论要不要盖「作者」标记）。
+            TemplateRoute.COMMENTS -> {
+                val novelId = intent.getIntExtra(Params.NOVEL_ID, 0).toLong()
+                if (novelId > 0L) {
+                    CommentsFragment.newInstance(
+                        novelId,
+                        ObjectPool.get<Novel>(novelId).value?.user?.userId ?: 0L,
+                        ObjectType.NOVEL,
+                    )
+                } else {
+                    val illustId = Params.getLongCompat(intent, Params.ILLUST_ID)
+                    CommentsFragment.newInstance(
+                        illustId,
+                        ObjectPool.get<Illust>(illustId).value?.user?.userId ?: 0L,
+                        ObjectType.ILLUST,
+                    )
+                }
+            }
             // V3 / MD3-E 重做版，替代 legacy FragmentLocalUsers（当前账号 hero 卡 +
             // 其他账号分段行 + 添加账号独行）
             TemplateRoute.ACCOUNT_SWITCH -> AccountSwitchV3Fragment()
@@ -199,7 +216,7 @@ object TemplateRouteFactory {
             TemplateRoute.FANS -> UserFansFeedFragment.newInstance(Params.getUserId(intent))
             TemplateRoute.ILLUST_LIKERS ->
                 LikeUsersFeedFragment.newInstance(
-                    intent.requireSerializable(Params.CONTENT, Illust::class.java)
+                    (intent.getSerializableExtra(Params.CONTENT) as? Illust) ?: Illust(id = 0L)
                 )
             TemplateRoute.NOVEL_LIKERS ->
                 LikeUsersFeedFragment.newInstance(
@@ -267,8 +284,6 @@ object TemplateRouteFactory {
                     intent.getStringExtra(Params.KEY_WORD),
                 )
             TemplateRoute.USER_NOVELS -> UserNovelFeedFragment.newInstance(Params.getUserId(intent))
-            }
-            }
             TemplateRoute.LOCAL_NOVEL_LIBRARY -> LocalLibraryFragment()
             TemplateRoute.COMIC_READER -> {
                 ComicReaderV3Fragment.newInstance(Params.getLongCompat(intent, Params.ILLUST_ID))
@@ -302,8 +317,6 @@ object TemplateRouteFactory {
             TemplateRoute.FILE_NAME_FORMAT -> FragmentFileName.newInstance()
             TemplateRoute.DOWNLOAD_PATH_SETTINGS -> DownloadPathSettingsFragment()
             TemplateRoute.ARIA2_SETTINGS -> Aria2SettingsFragment()
-            TemplateRoute.AI_TRANSLATE_SETTINGS -> AiTranslateSettingsFragment()
-            TemplateRoute.WEBDAV_SETTINGS -> WebDavSettingsFragment()
             TemplateRoute.NOVEL_HEADER_SETTINGS -> NovelHeaderSettingsFragment()
             // 旧 key 是线上契约不能删；已移除的空捐赠页安全降级到关于页。
             TemplateRoute.DONATE -> FragmentAboutApp()
@@ -393,12 +406,12 @@ object TemplateRouteFactory {
             TemplateRoute.UGOIRA_RANK -> UgoiraRankFragment.newInstance()
             TemplateRoute.UGOIRA_FRAMES ->
                 UgoiraFramesFragment.newInstance(
-                    intent.requireSerializable(Params.CONTENT, Illust::class.java),
+                    (intent.getSerializableExtra(Params.CONTENT) as? Illust) ?: Illust(id = 0L),
                     intent.getStringExtra(UgoiraFramesFragment.ARG_OFFLINE_DIR),
                 )
             TemplateRoute.IMAGE_FILTER ->
                 ImageFilterFragment.newInstance(
-                    intent.requireSerializable(Params.CONTENT, Illust::class.java),
+                    (intent.getSerializableExtra(Params.CONTENT) as? Illust) ?: Illust(id = 0L),
                     intent.getIntExtra(Params.INDEX, 0),
                 )
             TemplateRoute.EVENT_HISTORY -> FragmentEventHistory()
@@ -406,7 +419,9 @@ object TemplateRouteFactory {
             // 聊天 / 广场相关路由已随 `lean` 删除：这几个 key 现在落到插画详情，不再有对应页面。
             TemplateRoute.PLAZA_BLOCKS,
             TemplateRoute.PLAZA_REPORT,
-            TemplateRoute.PLAZA_OPEN_ILLUST,
+            TemplateRoute.PLAZA_OPEN_ILLUST -> FragmentCollection.newInstance(0)
             TemplateRoute.NOTIFICATION_CENTER -> NotificationPagerFragment()
             TemplateRoute.NOTIFICATION_VIEW_MORE -> NotificationViewMoreFragment()
             TemplateRoute.INFO_CATEGORY -> InfoCategoryListFragment()
+        }
+}

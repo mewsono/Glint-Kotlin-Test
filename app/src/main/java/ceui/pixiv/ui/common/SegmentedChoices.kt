@@ -54,7 +54,7 @@ class ConnectedChoices internal constructor(private val buttons: List<TextView>)
 /** 造一组互斥档位；[onSelect] 只在用户点击时回调，初始选中第 0 项。 */
 fun connectedChoices(
     context: Context,
-    labels: List<String>,
+    labels: List<CharSequence>,
     onSelect: (Int) -> Unit,
 ): ConnectedChoices {
     val buttons = labels.mapIndexed { index, label ->
@@ -74,13 +74,19 @@ fun connectedChoices(
 /**
  * 一行可横滑的胶囊选项（滤镜「调节」项那种）。同样是从删掉的 `ui/library` 里接手过来的最小实现：
  * `select(index)` 换高亮，`view` 是一个 [android.widget.HorizontalScrollView]（调用方会往里塞 padding）。
+ * 文案会随状态变（滤镜「调节」项的数值），所以还留了一个 [setLabels] 做原地重建。
  */
-class ChoiceChips internal constructor(private val scroller: android.widget.HorizontalScrollView, private val row: LinearLayout) {
+class ChoiceChips internal constructor(
+    private val scroller: android.widget.HorizontalScrollView,
+    private val row: LinearLayout,
+    private val onSelect: (Int) -> Unit,
+) {
     val view: android.view.View get() = scroller
-    private val buttons get() = (0 until row.childCount).map { row.getChildAt(it) as TextView }
 
     var selectedIndex: Int = 0
         private set
+
+    private val buttons get() = (0 until row.childCount).map { row.getChildAt(it) as TextView }
 
     fun select(index: Int) {
         if (index !in 0 until row.childCount) return
@@ -94,32 +100,42 @@ class ChoiceChips internal constructor(private val scroller: android.widget.Hori
             button.setTextColor(if (active) 0xFFFFFFFF.toInt() else 0x993B6CF6.toInt())
         }
     }
+
+    /** 换一套文案（数量可以不同），选中项尽量保持在原位。 */
+    fun setLabels(labels: List<CharSequence>) {
+        val active = selectedIndex
+        row.removeAllViews()
+        val density = row.resources.displayMetrics.density
+        labels.forEachIndexed { index, label ->
+            val chip = TextView(row.context).apply {
+                text = label
+                gravity = Gravity.CENTER
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                setPadding(
+                    (14 * density).toInt(), (8 * density).toInt(),
+                    (14 * density).toInt(), (8 * density).toInt(),
+                )
+                setOnClickListener { onSelect(index) }
+            }
+            row.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * density).toInt() })
+        }
+        if (row.childCount > 0) select(active.coerceIn(0, row.childCount - 1))
+    }
 }
 
 /** 造一行可横滑的胶囊选项；[onSelect] 只在用户点击时回调。 */
 fun choiceChips(
     context: Context,
-    labels: List<String>,
+    labels: List<CharSequence>,
     scroll: Boolean = true,
     onSelect: (Int) -> Unit,
 ): ChoiceChips {
     val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-    val density = context.resources.displayMetrics.density
-    labels.forEachIndexed { index, label ->
-        val chip = TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            setPadding((14 * density).toInt(), (8 * density).toInt(), (14 * density).toInt(), (8 * density).toInt())
-            setOnClickListener { onSelect(index) }
-        }
-        row.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * density).toInt() })
-    }
     val scroller = android.widget.HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
         if (scroll) addView(row, android.widget.FrameLayout.LayoutParams(-2, -2))
         else addView(row, android.widget.FrameLayout.LayoutParams(-1, -2))
     }
-    return ChoiceChips(scroller, row).also { it.select(0) }
+    return ChoiceChips(scroller, row, onSelect).also { it.setLabels(labels) }
 }

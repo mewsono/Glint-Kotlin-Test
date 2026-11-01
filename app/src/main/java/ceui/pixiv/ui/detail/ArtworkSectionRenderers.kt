@@ -264,8 +264,8 @@ internal fun ArtworkV3Fragment.heroRenderer() =
     feedRenderer<ArtworkHeroItem, SectionV3HeroBinding>(
         inflate = SectionV3HeroBinding::inflate,
         fullSpan = true,
-        bindPayloads = { cell, payloads ->
-            Unit
+        bindPayloads = { _, _ ->
+            false
         },
     ) { cell ->
         val illust = cell.item.illust
@@ -323,8 +323,8 @@ internal fun ArtworkV3Fragment.descRenderer() =
         inflate = SectionV3DescriptionBinding::inflate,
         fullSpan = true,
         recycle = { cell -> clearPendingDescPreDraw(cell.binding) },
-        bindPayloads = { cell, payloads ->
-            Unit
+        bindPayloads = { _, _ ->
+            false
         },
     ) { cell ->
         // HTML 解析对长 caption 不便宜;caption 不变(滚动来回重绑)就跳过重解析。
