@@ -38,11 +38,8 @@ import ceui.pixiv.feeds.FeedRenderer
 import ceui.pixiv.feeds.FeedUiState
 import ceui.pixiv.feeds.pixiv.pixivFeedSource
 import ceui.pixiv.feeds.feedViewModels
-import ceui.pixiv.snapshot.SnapshotCommentsFeedSource
-import ceui.pixiv.snapshot.SnapshotManagerFragment
 import ceui.pixiv.session.SessionManager
 import ceui.pixiv.ui.detail.showV3Menu
-import ceui.pixiv.ui.translate.verbatimWarningText
 import ceui.pixiv.ui.user.UserActionReceiver
 import ceui.pixiv.utils.setOnClick
 import ceui.pixiv.witstudio.dialog.WitDialog
@@ -66,11 +63,7 @@ class CommentsFragment : FeedFragment(R.layout.fragment_comments_feed), CommentA
         val objectId: Long = b.getLong("objectId")
         val objectArthurId: Long = b.getLong("objectArthurId")
         val objectType: String = b.getString("objectType").orEmpty()
-        val snapshotId: String? = b.getString(SnapshotManagerFragment.ARG_SNAPSHOT_ID)
-        val snapshotIsAuto: Boolean = b.getBoolean(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, false)
     }
-
-    internal val isSnapshotMode: Boolean get() = args.snapshotId != null
 
     private val composer by viewModels<CommentsComposerViewModel> {
         viewModelFactory {
@@ -83,11 +76,7 @@ class CommentsFragment : FeedFragment(R.layout.fragment_comments_feed), CommentA
         val objectId = args.objectId
         val objectType = args.objectType
         val illustArthurId = args.objectArthurId
-        val snapshotId = args.snapshotId
-        val snapshotIsAuto = args.snapshotIsAuto
-        if (snapshotId != null) {
-            SnapshotCommentsFeedSource(snapshotId, illustArthurId, snapshotIsAuto)
-        } else {
+        run {
             pixivFeedSource(
                 initialFetch = {
                     if (objectType == ObjectType.ILLUST) {
@@ -127,25 +116,9 @@ class CommentsFragment : FeedFragment(R.layout.fragment_comments_feed), CommentA
         binding.toolbar.updatePadding(top = BarUtils.getStatusBarHeight())
         binding.toolbar.setNavigationOnClickListener { requireActivity().finish() }
         binding.toolbarTitle.text = getString(
-            if (isSnapshotMode) R.string.snapshot_comments_title else R.string.comments
+            R.string.comments
         )
 
-        if (isSnapshotMode) {
-            binding.commentComposer.isVisible = false
-            binding.bottomBar.isVisible = false
-            binding.replyBanner.isVisible = false
-        } else {
-            CommentComposerController.attach(
-                fragment = this,
-                view = binding.commentComposer,
-                panelRoot = binding.root,
-                panelContentView = feedBinding.feedListView,
-                palette = V3Palette.from(requireContext()),
-                composer = composer,
-                onSent = ::applySendResult,
-            )
-            setUpReplyBanner(binding)
-        }
     }
 
     /** Keeps reply-only UI outside the reusable top-level/stamp composer module. */
@@ -252,9 +225,6 @@ class CommentsFragment : FeedFragment(R.layout.fragment_comments_feed), CommentA
                         hideCommentTranslation(anchor, comment, parentCommentId)
                     }
                 } else {
-                    item(getString(R.string.string_translate_caption), R.drawable.ic_baseline_translate_24) {
-                        translateCommentInline(commentText, comment, parentCommentId)
-                    }
                 }
             }
             if (!isOwn) {
@@ -279,29 +249,6 @@ class CommentsFragment : FeedFragment(R.layout.fragment_comments_feed), CommentA
      * 在 cell 内 hairline 下面展开(见 [commentCardRenderer] / CommentTranslationReveal.kt)。
      * 译完先登记到 [pendingTranslationReveals] 再 mutateItems,重绑那一次才播展开动画。
      */
-    private fun translateCommentInline(text: String, comment: Comment, parentCommentId: Long) {
-        val src = text.trim()
-        if (src.isEmpty()) return
-        Common.showToast(R.string.string_translating)
-        if (!translatingCommentIds.add(comment.id)) return
-        launchSuspend {
-            try {
-                val result = translateTextOrPrompt(src) ?: return@launchSuspend
-                val translated = result.value
-                // 「原样度」:内联译文没有弹窗,命中时用 Toast 提示一次。
-                verbatimWarningText(requireContext(), result.servedBy, src, translated)?.let {
-                    Common.showToast(it)
-                }
-                pendingTranslationReveals += comment.id
-                feedViewModel.mutateItems { items ->
-                    composer.applyTranslation(items, comment.id, parentCommentId, translated)
-                }
-            } finally {
-                translatingCommentIds -= comment.id
-            }
-        }
-    }
-
     /** 「隐藏译文」:先把 cell 里的译文块收起来,收完再从数据里摘掉(重绑成 gone,不闪)。 */
     private fun hideCommentTranslation(anchor: View, comment: Comment, parentCommentId: Long) {
         val commit = {

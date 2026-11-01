@@ -106,8 +106,8 @@ class UgoiraFramesFragment : Fragment(R.layout.fragment_ugoira_frames) {
     private lateinit var speedButton: TextView
     private lateinit var shareButton: ImageView
     private lateinit var saveButton: TextView
-    private lateinit var modeGroup: ceui.pixiv.ui.library.LibraryFilterViews.ChoiceGroup
-    private lateinit var formatGroup: ceui.pixiv.ui.library.LibraryFilterViews.ChoiceGroup
+    private lateinit var modeGroup: ceui.pixiv.ui.common.ConnectedChoices
+    private lateinit var formatGroup: ceui.pixiv.ui.common.ConnectedChoices
     private lateinit var setInButton: ImageView
     private lateinit var setOutButton: ImageView
 
@@ -336,11 +336,12 @@ class UgoiraFramesFragment : Fragment(R.layout.fragment_ugoira_frames) {
             addView(frameInfo)
         }
         // 「选帧 | 片段」与「GIF | MP4」都是 ≤ 4 个互斥档位：沿用收藏库筛选面板的 MD3-E 连通按钮组。
-        val choices = ceui.pixiv.ui.library.LibraryFilterViews(ctx)
-        modeGroup = choices.connectedGroup(
+        modeGroup = ceui.pixiv.ui.common.connectedChoices(
+            ctx,
             listOf(getString(R.string.ugoira_frames_mode_frame), getString(R.string.ugoira_frames_mode_clip)),
         ) { model.setClipMode(it == 1) }
-        formatGroup = choices.connectedGroup(
+        formatGroup = ceui.pixiv.ui.common.connectedChoices(
+            ctx,
             listOf(getString(R.string.setting_ugoira_save_format_gif), getString(R.string.setting_ugoira_save_format_mp4)),
         ) { model.setClipFormat(it == 1) }
         formatGroup.view.contentDescription = getString(R.string.setting_ugoira_save_format)

@@ -72,7 +72,7 @@ class UserNovelSeriesFeedFragment : FeedFragment(), ExportFormatCallback {
 
     private val binding by viewBinding(FragmentToolbarFeedBinding::bind)
 
-    private val novelDownloadRequest by viewModels { CrossSeriesDownloadRequestViewModel() }
+    private val novelDownloadRequest: CrossSeriesDownloadRequestViewModel by viewModels()
 
     /**
      * 两种形态,对齐 [UserNovelFeedFragment]:

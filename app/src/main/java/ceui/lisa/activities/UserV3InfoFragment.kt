@@ -22,7 +22,6 @@ import ceui.lisa.utils.PixivOperate
 import ceui.lisa.viewmodel.UserViewModel
 import ceui.pixiv.utils.Event
 import ceui.pixiv.api.model.WebUserDetail
-import ceui.pixiv.ui.comments.translateComment
 import ceui.pixiv.session.SessionManager
 
 /** 作者简介折叠阈值，与 V3 详情页简介一致。 */
@@ -84,7 +83,6 @@ class UserV3InfoFragment : Fragment() {
                 binding.muteSwitch.setOnCheckedChangeListener(muteSwitchListener)
             }
         }
-        binding.bioTranslate.setOnClickListener { translateBio() }
         binding.bioToggle.setOnClickListener {
             bioExpanded = !bioExpanded
             applyBioCollapseState()
@@ -104,11 +102,6 @@ class UserV3InfoFragment : Fragment() {
         binding.bio.text = full
         binding.bio.movementMethod = android.text.method.LinkMovementMethod.getInstance()
         applyBioCollapseState()
-    }
-
-    private fun translateBio() {
-        val plain = (bioFullText ?: binding.bio.text).toString().trim()
-        translateComment(plain)
     }
 
     /**

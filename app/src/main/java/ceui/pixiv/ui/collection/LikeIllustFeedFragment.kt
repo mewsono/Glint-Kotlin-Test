@@ -24,8 +24,6 @@ import ceui.pixiv.api.model.Illust
 import ceui.pixiv.feeds.FeedItem
 import ceui.pixiv.feeds.pixiv.pixivFeedSource
 import ceui.pixiv.feeds.feedViewModels
-import ceui.pixiv.db.mirror.MirrorContentType
-import ceui.pixiv.db.mirror.trackBookmarkShelfVisit
 import ceui.pixiv.session.SessionManager
 import ceui.pixiv.ui.common.IllustFeedFragment
 import ceui.pixiv.ui.common.IllustFeedItem
@@ -134,7 +132,6 @@ class LikeIllustFeedFragment : IllustFeedFragment() {
     }
 
     /**
-     * 打开**自己**的收藏页 = 开启这个书架的本地镜像（见 [trackBookmarkShelfVisit]）。
      *
      * 放 onResume 而不是 onViewCreated：宿主 pager 用的是
      * BEHAVIOR_RESUME_ONLY_CURRENT_FRAGMENT，相邻 tab 的 Fragment 会被提前创建、
@@ -144,7 +141,6 @@ class LikeIllustFeedFragment : IllustFeedFragment() {
      */
     override fun onResume() {
         super.onResume()
-        requireContext().trackBookmarkShelfVisit(userId, starType, MirrorContentType.ILLUST)
     }
 
     override fun onDestroyView() {

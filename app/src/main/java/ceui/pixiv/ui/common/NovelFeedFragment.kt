@@ -100,7 +100,7 @@ abstract class NovelFeedFragment(
 
     abstract override val feedViewModel: FeedViewModel<String>
 
-    private val novelDownloadRequest by viewModels { NovelDownloadRequestViewModel() }
+    private val novelDownloadRequest: NovelDownloadRequestViewModel by viewModels()
 
     /**
      * 小说卡“下载这一篇”：有默认格式直接下，设置为“每次询问”时弹 [ExportSheet]。

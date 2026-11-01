@@ -72,7 +72,7 @@ class BulkSelectV3Fragment : Fragment() {
         }
     }
 
-    private val bulkViewModel by viewModels { BulkSelectRequestViewModel() }
+    private val bulkViewModel: BulkSelectRequestViewModel by viewModels()
 
     private val items = mutableListOf<SelectableItem>()
     private val adapter: BulkSelectAdapter by lazy {

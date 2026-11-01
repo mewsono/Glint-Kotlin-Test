@@ -8,7 +8,6 @@ import ceui.pixiv.shaftapi.AppConfigResponse
 import ceui.pixiv.shaftapi.CloudTranslateEngine
 import ceui.pixiv.api.Client
 import ceui.pixiv.shaftapi.Nana7miPlan
-import ceui.pixiv.push.InAppPushArrival
 import com.google.gson.Gson
 import ceui.pixiv.session.SessionManager
 import com.tencent.mmkv.MMKV
@@ -115,18 +114,7 @@ class RemoteAppConfig @Inject constructor() {
     val nana7miPlanLive: LiveData<Nana7miPlan?>
         get() = planLive
 
-    private val pushLive = MutableLiveData<InAppPushArrival?>()
 
-    /**
-     * 这次拉取捎回来的应用内推送（服务端 `inapp-push.js`），MainActivity 观察它弹一次框。
-     *
-     * 故意**不落 MMKV**：推送是「没回执过的才下发」，这台设备没展示成功（进程死了、没登录
-     * 到首页）服务端下次冷启动会再给；落了缓存反而要自己处理过期和已读。LiveData 会对新
-     * observer 重放最后一个值（转屏重建 Activity 那次），去重交给 [ceui.pixiv.push.InAppPushCenter]
-     * 的本地已看名单。
-     */
-    val inAppPushLive: LiveData<InAppPushArrival?>
-        get() = pushLive
 
     /** 最近一次成功拉取所用的 uid（0 = 未登录）；和当前登录态不一致就说明该重拉了。 */
     @Volatile
@@ -328,9 +316,6 @@ class RemoteAppConfig @Inject constructor() {
         nana7miRequestId = !BuildConfig.IS_LITE && response.nana7miRequestIdEnabled == true
         applyPlan(uid, response.plan)
         // 推送和档位一样只给签了名的登录用户；Lite 连 plan 都拿不到，推送也一并屏蔽。
-        val push = if (BuildConfig.IS_LITE || uid <= 0L) null else response.push
-        pushLive.postValue(push?.let { InAppPushArrival(uid, it) })
-        if (push != null) Timber.tag(TAG).i("in-app push arrived uid=%d id=%s", uid, push.id)
         // 和下面的搜索开关同一条规矩：服务端没说就沿用旧值。老服务端没这个字段，
         // 客户端于是一直停在默认的关 —— 不会去打一条它没宣告过的路由。
         response.cloudTranslateEnabled?.let { on ->

@@ -14,8 +14,6 @@ import ceui.pixiv.api.model.Illust
 import ceui.pixiv.download.StageStore
 import ceui.lisa.utils.AnimatedGifEncoder
 import ceui.lisa.utils.Params
-import ceui.pixiv.ui.interpolate.RifeInterpolator
-import ceui.pixiv.ui.interpolate.RifePrefs
 import com.blankj.utilcode.util.ZipUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -171,10 +169,7 @@ object UgoiraEngine {
      */
     fun peekPlayableFrames(illust: Illust): UgoiraFrames? {
         val ctx = Shaft.getContext()
-        val useRife = RifePrefs.isEnabled() && RifeInterpolator.isAvailable(ctx)
-        if (useRife) {
-            readFramesDir(framesDirFor(ctx, illust, true), true)?.let { return it }
-        }
+        // 补帧（RIFE）已随 `lean` 删除：盘上只会有原速帧序列一种版本。
         return readFramesDir(framesDirFor(ctx, illust, false), false)
     }
 
@@ -522,9 +517,8 @@ object UgoiraEngine {
         try {
             val ctx = Shaft.getContext()
 
-            val useRife = RifePrefs.isEnabled() &&
-                !rifeHardFailed &&
-                RifeInterpolator.isAvailable(ctx)
+            // 补帧（RIFE / ncnn）已随 `lean` 删除,总是原速版。
+            val useRife = false
 
             // 磁盘上已有想要的那一版帧序列:直接用。
             readFramesDir(framesDirFor(ctx, illust, useRife), useRife)?.let {
@@ -534,23 +528,6 @@ object UgoiraEngine {
                     id, ready.dir.name, ready.files.size, ready.video != null,
                 )
                 return ready
-            }
-
-            // 想要补帧版但盘上只有原速版:延迟就躺在 delays.txt 里,先判「值不值得补」。
-            // 帧率已高 / 帧数超限的动图**永远不会产出 _rife 目录**,而成功路径的
-            // [discardIntermediates] 已把 zip/解压帧删了 —— 不在这里提前判掉的话,这类动图
-            // 每次冷启动都会白白重下整个 zip、解压、再丢弃,循环往复。
-            if (useRife) {
-                readFramesDir(framesDirFor(ctx, illust, false), false)?.let { base ->
-                    if (!RifeInterpolator.worthInterpolating(base.delaysMs)) {
-                        val ready = finishAndPublish(id, base, flow)
-                        Timber.tag(UGOIRA_LOG_TAG).i(
-                            "[pipeline] illust=%d 磁盘命中原速帧序列且不值得补帧(%d帧,最小延迟%dms,mp4=%b),直接返回",
-                            id, ready.files.size, ready.delaysMs.min(), ready.video != null,
-                        )
-                        return ready
-                    }
-                }
             }
 
             // 1/4 元数据(轻,不占并发额度)
@@ -634,70 +611,6 @@ object UgoiraEngine {
                         id, if (cachedBase != null) "复用盘上已有" else "落盘",
                         baseFrames.files.size, baseFrames.totalMs, System.currentTimeMillis() - t0,
                     )
-
-                    // 3.5/4 RIFE 补帧(可选)。任何失败都保留上面的原速版,播放不因补帧挂掉 ——
-                    // 这个承诺必须覆盖到**转存阶段的异常**:rife 输出的 PNG 被截断(磁盘满是
-                    // 现实触发源,补帧中间产物正是吃磁盘大户)时,writeFramesDir 的 decode 会
-                    // 直接抛,不兜住的话原速版明明已落盘,整条 pipeline 却报 FAILED 给用户看
-                    // 重试按钮。除取消外,补帧侧任何 Throwable 都只降级、不外抛。
-                    if (useRife && RifeInterpolator.worthInterpolating(srcDelays)) {
-                        try {
-                            rifeGate.withPermit {
-                                flow.value = UgoiraProgress(UgoiraPhase.INTERPOLATE, 0)
-                                Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [3.5/4] INTERPOLATE 开始 (%d帧)", id, srcFrames.size)
-                                var lastQuarter = -1
-                                val pipelineJob = coroutineContext[Job]
-                                val rife = RifeInterpolator.interpolate(
-                                    ctx, unzipFolder, srcDelays,
-                                    workRoot = rifeWorkRoot,
-                                    isActive = { pipelineJob?.isActive != false },
-                                ) { pct ->
-                                    flow.value = UgoiraProgress(UgoiraPhase.INTERPOLATE, pct)
-                                    if (pct / 25 != lastQuarter) {
-                                        lastQuarter = pct / 25
-                                        Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [3.5/4] INTERPOLATE %d%%", id, pct)
-                                    }
-                                }
-                                if (rife != null) {
-                                    Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [3.5/4] INTERPOLATE 完成 → %d帧", id, rife.delaysMs.size)
-                                    coroutineContext.ensureActive()
-                                    // 4/4 转存补帧结果为播放用 JPEG 序列(RIFE 出的是 PNG,280 帧要 50~110MB,必须转)
-                                    gate.withPermit {
-                                        flow.value = UgoiraProgress(UgoiraPhase.ENCODE, 0)
-                                        Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [4/4] 转存补帧帧序列开始", id)
-                                        var lastQ = -1
-                                        val rifeDir = framesDirFor(ctx, illust, true)
-                                        val converted = writeFramesDir(
-                                            rifeDir, sortedUgoiraFrames(rife.framesDir), rife.delaysMs,
-                                        ) { pct ->
-                                            flow.value = UgoiraProgress(UgoiraPhase.ENCODE, pct)
-                                            if (pct / 25 != lastQ) {
-                                                lastQ = pct / 25
-                                                Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [4/4] 转存 %d%%", id, pct)
-                                            }
-                                        }
-                                        if (converted != null) {
-                                            result = converted
-                                            Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d 补帧帧序列就绪(%d帧,一圈%dms)", id, converted.files.size, converted.totalMs)
-                                        }
-                                    }
-                                } else if (pipelineJob?.isActive != false) {
-                                    rifeHardFailed = true
-                                    Timber.tag(UGOIRA_LOG_TAG).w("[pipeline] illust=%d [3.5/4] INTERPOLATE 失败,本会话不再尝试补帧,保留原速版", id)
-                                } else {
-                                    Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [3.5/4] INTERPOLATE 被取消,保留原速版", id)
-                                }
-                            }
-                        } catch (c: CancellationException) {
-                            throw c
-                        } catch (t: Throwable) {
-                            // 不置 rifeHardFailed:rife 本身可能是好的,坏的是转存(磁盘满/坏 PNG),
-                            // 那是内容/环境级问题,下条动图未必复发。
-                            Timber.tag(UGOIRA_LOG_TAG).w(t, "[pipeline] illust=%d 补帧/转存异常,保留原速版继续", id)
-                        }
-                    } else if (useRife) {
-                        Timber.tag(UGOIRA_LOG_TAG).i("[pipeline] illust=%d [3.5/4] INTERPOLATE 跳过(帧率已高或帧数超限)", id)
-                    }
 
                     // 走到这里 = 本轮正常收尾(原速版必在,补帧成败已定)。异常路径不经过这;
                     // 取消(划走 abandon)也跳过 —— 与 [discardIntermediates] 的「只在成功路径

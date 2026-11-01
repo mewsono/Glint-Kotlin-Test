@@ -18,8 +18,6 @@ import ceui.lisa.utils.Params
 import ceui.pixiv.api.Client
 import ceui.loxia.Novel
 import ceui.pixiv.feeds.FeedItem
-import ceui.pixiv.db.mirror.MirrorContentType
-import ceui.pixiv.db.mirror.trackBookmarkShelfVisit
 import ceui.pixiv.feeds.feedViewModels
 import ceui.pixiv.feeds.pixiv.pixivFeedSource
 import ceui.pixiv.ui.common.NovelFeedFragment
@@ -115,7 +113,6 @@ class LikeNovelFeedFragment : NovelFeedFragment() {
     }
 
     /**
-     * 打开**自己**的收藏页 = 开启这个书架的本地镜像（见 [trackBookmarkShelfVisit]）。
      *
      * 放 onResume 而不是 onViewCreated：宿主 pager 用的是
      * BEHAVIOR_RESUME_ONLY_CURRENT_FRAGMENT，相邻 tab 的 Fragment 会被提前创建、
@@ -125,7 +122,6 @@ class LikeNovelFeedFragment : NovelFeedFragment() {
      */
     override fun onResume() {
         super.onResume()
-        requireContext().trackBookmarkShelfVisit(userId, starType, MirrorContentType.NOVEL)
     }
 
     override fun onDestroyView() {

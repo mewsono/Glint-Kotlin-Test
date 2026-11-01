@@ -87,14 +87,14 @@ class NovelBulkSelectV3Fragment : Fragment(), ExportFormatCallback {
         }
     }
 
-    private val bulkViewModel by viewModels { NovelBulkSelectRequestViewModel() }
+    private val bulkViewModel: NovelBulkSelectRequestViewModel by viewModels()
 
     /** 源列表。勾选结果靠下标换回这里的 [Novel]。 */
     private var source: List<Novel> = emptyList()
 
     private val items = mutableListOf<SelectableNovel>()
 
-    private val novelDownloadRequest by viewModels { NovelBulkDownloadRequestViewModel() }
+    private val novelDownloadRequest: NovelBulkDownloadRequestViewModel by viewModels()
 
     /**
      * 封面的 Glide 请求管理器，建一次复用。**别在 bind 里 `Glide.with(view)`** ——
