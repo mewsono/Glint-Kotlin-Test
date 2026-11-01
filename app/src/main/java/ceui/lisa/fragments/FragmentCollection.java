@@ -265,8 +265,6 @@ public class FragmentCollection extends BaseFragment<ViewpagerWithTablayoutBindi
                         Intent intent = new Intent(mContext, TemplateActivity.class);
                         intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.BOOKMARK_LIBRARY.key);
                         intent.putExtra(Params.STAR_TYPE, restrict);
-                        intent.putExtra(
-                                ceui.pixiv.ui.library.BookmarkLibraryUi.ARG_CONTENT_TYPE,
                         startActivity(intent);
                     } else if (which == 1) {
                         long uid = SessionManager.INSTANCE.getLoggedInUid();

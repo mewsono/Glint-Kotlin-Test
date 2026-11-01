@@ -100,7 +100,7 @@ jobs:
             if [ -f /tmp/build.log ]; then
               # Only compiler diagnostics, and a high cap: one run should list every file
               # that still references deleted code, so fixes can be batched.
-              grep -E "^e: " /tmp/build.log \
+              grep -E "^e: |error:|cannot find symbol|does not exist" /tmp/build.log \
                 | sed 's|file:///home/runner/work/[^/]*/[^/]*/||' | head -1500
               echo '---'
               grep -E "FAILURE:|What went wrong|Execution failed|Caused by:" /tmp/build.log | head -12
