@@ -195,12 +195,8 @@ public class FragmentSettingsViewing extends SettingsPageFragment<FragmentSettin
                             }
                         })
                         .show());
+    }
 
-        // 动图 RIFE AI 补帧,默认关闭。开关 on 与「模型真落盘」强绑定:
-        // 模型已在位 → 当场落盘 + 弹「设置成功」;模型缺失 → 先不落盘,跳下载页,
-        // 等用户回来(onResume)再结算——真落了才落盘 + toast,没落就把开关拨回 off 且不落盘。
-        // 归一化:别处(AI 设置页可长按删模型)把模型删掉后,把残留的 on 静默落回 false,
-        // 保证「开关开 ⇒ 模型一定落盘」在任何入口下都成立。
     private void updateArtworkV3FabPositionLabel() {
         int labelRes;
         switch (Shaft.sSettings.getArtworkV3FabPosition()) {
@@ -419,10 +415,6 @@ public class FragmentSettingsViewing extends SettingsPageFragment<FragmentSettin
     @Override
     public void onResume() {
         super.onResume();
-    }
-
-        if (rootView != null) {
-        }
     }
 
     @Override
