@@ -63,8 +63,6 @@ class SearchNovelRepo @JvmOverloads constructor(
     private val filterMapper: NovelFilterMapper = NovelFilterMapper().enableFilterStarSize()
     @Volatile
     private var nana7miSession = Nana7miAccountSession()
-    @Volatile
-
     /** 本轮首屏定下的缓存容忍度，翻页沿用——翻页期间跨了午夜也不该让同一轮列表换一套规则。 */
     @Volatile
     private var cacheMaxAgeMs = Nana7miSearchCache.MAX_AGE_FRESH_MS
