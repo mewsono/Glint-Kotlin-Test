@@ -9,8 +9,6 @@ import ceui.pixiv.api.model.Illust
 import ceui.pixiv.cache.ObjectPool
 import ceui.pixiv.feeds.FeedItem
 import ceui.pixiv.feeds.feedRenderer
-import ceui.pixiv.snapshot.SnapshotRuntimeCache
-import ceui.pixiv.snapshot.localizeIllust
 
 /**
  * 顶部大图 —— 逐页原生 [FeedItem],外层瀑布流回收每页。
@@ -156,15 +154,6 @@ private inline fun <reified T : ArtworkPageItem> ArtworkV3Fragment.pageRenderer(
             return@feedRenderer
         }
         adapter.onBindViewHolder(holder, cell.item.pageIndex)
-        if (isSnapshotMode) {
-            // 点大图不在这里另起一份 intent:上一行的 adapter.onBindViewHolder 已经按
-            // AbstractIllustAdapter.snapshotId 路由到「快照大图」了,而且它带了
-            // EXTRA_ENTER_BOUNDS —— 大图页(透明窗口)靠这个矩形从点击处展开进场。
-            // 在这里覆盖掉等于把过渡动画退化成居中淡入,还让同一条路由散成两份会漂移的副本。
-            // 长按仍要显式置空:IllustAdapter 在快照模式下不再挂长按下载,但复用的 itemView
-            // 上可能还留着上一次绑定的监听。
-            cell.itemView.setOnLongClickListener(null)
-        }
     }
 
 internal fun ArtworkV3Fragment.artworkUgoiraRenderer() =
@@ -175,14 +164,10 @@ internal fun ArtworkV3Fragment.artworkUgoiraRenderer() =
         detach = { cell -> cell.binding.root.onFeedDetached() },
         recycle = { cell -> cell.binding.root.recycle() },
     ) { cell ->
-        // 快照模式不写 ObjectPool:作品与帧序列都从快照数据取(同 ensureSnapshotPageAdapter)。
-        val snapshot = snapshotId?.let { SnapshotRuntimeCache.get(it) }
-        val illust: Illust = (if (isSnapshotMode) snapshot?.localizeIllust() else ObjectPool.get<Illust>(cell.item.illustId).value)
-            ?: return@feedRenderer
-        val offline = snapshot?.offlineUgoira(snapshotIsAuto)
+        val illust: Illust = ObjectPool.get<Illust>(cell.item.illustId).value ?: return@feedRenderer
         val maxHeight = (resources.displayMetrics.heightPixels * 0.7f).toInt()
-        cell.binding.root.bind(viewLifecycleOwner, illust, maxHeight, offline = offline)
-        cell.binding.root.setOnClickListener { openUgoiraViewer(it, illust, offline) }
+        cell.binding.root.bind(viewLifecycleOwner, illust, maxHeight)
+        cell.binding.root.setOnClickListener { openUgoiraViewer(it, illust) }
     }
 
 /**

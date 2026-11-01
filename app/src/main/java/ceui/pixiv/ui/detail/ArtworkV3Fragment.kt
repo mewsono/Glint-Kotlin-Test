@@ -44,12 +44,6 @@ import ceui.pixiv.feeds.FeedViewModel
 import ceui.pixiv.feeds.feedViewModels
 import ceui.pixiv.feeds.updateItems
 import ceui.pixiv.services.requireNetworkStateManager
-import ceui.pixiv.snapshot.AutoSnapshotEngine
-import ceui.pixiv.snapshot.SnapshotArtworkFeedSource
-import ceui.pixiv.snapshot.SnapshotManagerFragment
-import ceui.pixiv.snapshot.SnapshotRepository
-import ceui.pixiv.snapshot.SnapshotRuntimeCache
-import ceui.pixiv.snapshot.localizeIllust
 import ceui.pixiv.ui.comments.CommentComposerView
 import ceui.pixiv.ui.comments.CommentTarget
 import ceui.pixiv.ui.comments.CommentsComposerViewModel
@@ -63,7 +57,6 @@ import ceui.pixiv.ui.common.staggerIllustRenderer
 import ceui.pixiv.ui.navigation.TemplateRoute
 import ceui.pixiv.ui.task.PageLoadRetryController
 import ceui.pixiv.ui.task.renderImageLoadStatusBanner
-import ceui.pixiv.ui.upscale.IllustAiHelper
 import ceui.pixiv.utils.isHostStillResumed
 import ceui.pixiv.utils.ppppx
 import ceui.pixiv.utils.setOnClick
@@ -84,32 +77,22 @@ import timber.log.Timber
  * 数据源见 [ArtworkV3FeedSource];下载 FAB / 收藏态归 [ArtworkV3ViewModel]。无下拉刷新 ([refreshEnabled] = false)。
  */
 class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
-    /** 自动快照计时凭证。跨视图重建存活（与 Fragment 实例同寿），快照模式不用。 */
-    private val autoSnapshot = ArtworkAutoSnapshotTracker()
-
-    internal val snapshotId: String?
-        get() = arguments?.getString(SnapshotManagerFragment.ARG_SNAPSHOT_ID)
-
-    internal val snapshotIsAuto: Boolean
-        get() = arguments?.getBoolean(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, false) ?: false
-
+    /**
+     * 快照大图（连同它的只读模式）已随 `lean` 删除。详情页里还留着几处「快照下禁点」的守卫，
+     * 保留这个名字让它们继续以「不可能成立」的形式存在，而不是再散落一堆 `if (false)`。
+     */
     internal val isSnapshotMode: Boolean
-        get() = snapshotId != null
+        get() = false
 
     private val illustId: Long by
         lazy(LazyThreadSafetyMode.NONE) {
             // 兼容读：进程重建时恢复的 arguments 可能是旧版本按 Int 写入的
-            if (isSnapshotMode) 0L else Params.getLongCompat(requireArguments(), "illust_id")
+            Params.getLongCompat(requireArguments(), "illust_id")
         }
 
     override val feedViewModel by feedViewModels(autoLoad = false) {
-        // 零捕获:只把 id/快照 id/是否自动 读进局部值交给长命 VM 持有的数据源,不钉 Fragment。
-        val snapshot = arguments?.getString(SnapshotManagerFragment.ARG_SNAPSHOT_ID)
-        val snapshotAuto =
-            arguments?.getBoolean(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, false) ?: false
-        if (snapshot != null) {
-            SnapshotArtworkFeedSource(snapshot, snapshotAuto)
-        } else {
+        // 零捕获:只把 id 读进局部值交给长命 VM 持有的数据源,不钉 Fragment。
+        run {
             // 平板排版（layout-sw600dp + 设置开着）的作品图在舞台里，列表只出信息区块；折叠屏
             // 开合跨过 600dp 时这个 VM 活下来，差异由 reconcilePageItems 在视图重建时对齐
             ArtworkV3FeedSource(
@@ -140,7 +123,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
     // 顶部大图页共享的那一个 adapter(所有页 bind 都委托给它)。isGif 时不建(走 ugoira renderer)。
     private var pageAdapter: IllustAdapter? = null
     private lateinit var retryController: PageLoadRetryController
-    private var aiHelper: IllustAiHelper? = null
 
     // chrome
     private var _chromeBind: FragmentArtworkV3Binding? = null
@@ -236,15 +218,9 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
     /**
      * [ViewerPageLink] 用的作品键。
      *
-     * 快照页的 [illustId] 恒为 0L（快照只认 snapshotId），得从快照里那份 illust 取真实 id 才能和
-     * 大图侧广播的对上；取不到时给 0，匹配自然落空（安全降级）。
      */
     private val viewerLinkIllustId: Long
-        get() = if (isSnapshotMode) {
-            snapshotId?.let { SnapshotRuntimeCache.get(it) }?.illust?.id ?: 0L
-        } else {
-            illustId
-        }
+        get() = illustId
 
     /** 收起后欠着的一次回顶:等「隐藏页被移除」的通知到了再发,理由见 [drainCollapseResetScroll]。 */
     private var pendingCollapseResetScroll = false
@@ -262,7 +238,7 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
     // TabletLayout 的最小宽度判定与 layout-sw600dp 限定符是同一条线：命中时舞台 view 必然存在；
     // 平板上关掉「平板适配排版」时仍拿到 sw600dp 布局，舞台收起、信息栏铺满，等同手机排版
     private fun usesTabletStage(): Boolean =
-        !isSnapshotMode && TabletLayout.isEnabled(resources.configuration)
+        TabletLayout.isEnabled(resources.configuration)
 
     // ── 列表装配 ────────────────────────────────────────────────────────────
 
@@ -380,27 +356,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
                 hideFabBar = { immediate -> hideFabBar(immediate) },
                 showFabBar = ::showFabBar,
             )
-        if (isSnapshotMode) {
-            // 快照只读：保留收藏/关注按钮用于展示“那一刻”的状态，但点击一律无动作。
-            chromeBind.fabBar.root.isVisible = true
-            chromeBind.fabBar.fabDownloadContainer.isVisible = false
-            chromeBind.fabBar.fabDivider.isVisible = false
-            chromeBind.fabBar.fabBookmark.setOnClickListener {
-                Common.showToast(getString(R.string.snapshot_unsupported_toast))
-            }
-            chromeBind.fabBar.fabBookmark.setOnLongClickListener {
-                Common.showToast(getString(R.string.snapshot_unsupported_toast))
-                true
-            }
-            fabBarController.applyPalette(palette)
-            fabBarController.applyLayoutPreference(sideMargin = 20.ppppx)
-            applySnapshotBookmarkState()
-            chromeBind.composerRoot.isVisible = false
-            chromeBind.navMore.isVisible = false
-            chromeBind.toolbar.setNavigationOnClickListener { requireActivity().finish() }
-            handleSystemInsets()
-            return
-        }
         sectionLoader =
             SectionLoader<ArtworkSection>(viewLifecycleOwner) { it.load(illustId, feedViewModel) }
         muteMask = ArtworkMuteMask(this, chromeBind, illustGlide, ::setMuteMaskActive)
@@ -411,14 +366,9 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
                 viewModel = artworkViewModel,
                 fabBar = fabBarController,
                 currentPageIndex = { pageProgressIndex },
-                aiHelper = { aiHelper },
                 onOpenComicReader = ::openComicReader,
                 onForceOriginal = ::applyForceOriginal,
             )
-        aiHelper =
-            IllustAiHelper(this, chromeBind.root, ensureOverlay = ::ensureAiOverlay).also {
-                it.restoreUpscaleIfRunning(illustId)
-            }
 
         // 旋转 / 视图重建:feedViewModel 的列表存活(可能是展开态),但 pageAdapter 会重建为
         // 折叠态。二者不一致会出「p0 顶着展开胶囊、p1/p2 却已显示」的矛盾 UI。对齐 legacy(旋转即
@@ -473,7 +423,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
                 override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                     if (dy > 8) hideFabBar() else if (dy < -8) showFabBar()
                     refreshPageProgressPill()
-                    syncAutoSnapshotViewport()
                 }
 
                 override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
@@ -527,21 +476,12 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
             .setOnClickListener { retryController.retryAllFailed() }
     }
 
-    /** AI 画质增强 / 智能抠图覆盖层：只有跑 AI 任务才用。触发点 = IllustAiHelper 各入口。 */
-    private fun ensureAiOverlay() {
-        if (aiOverlayReady) return
-        aiOverlayReady = true
-        chromeBind.aiOverlayStub.inflate()
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        autoSnapshot.restore(savedInstanceState)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        autoSnapshot.save(outState)
     }
 
     override fun onResume() {
@@ -550,49 +490,33 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
         // viewerSyncedPage 会一直 ≥ 0，让 publishViewportRect 在之后每一次排版空跑。
         viewerViewportSynced = false
         viewerSyncedPage = -1
-        if (isSnapshotMode) {
-            // FeedSource 加载完成后用快照里的真实收藏态刷新只读心形按钮（兼容旧快照回落 illust.json）。
-            // 走同一个 helper 而不是在这里再内联一遍:那份内联只查 SnapshotRuntimeCache,
-            // 缓存没命中(4 条 LRU 被挤掉、进程重建)就什么都不做,心形停在默认灰;
-            // helper 有回落读 manifest 的 IO 分支。
-            applySnapshotBookmarkState()
-            return
-        }
-        autoSnapshot.onResume(illustId, ObjectPool.get<Illust>(illustId).value)
         // 横滑回来：表被挂起过，按当前视口决定接着走还是继续挂着 —— 滑走前停在相关作品那一段的页，
         // 滑回来时不一定有排版回调，不能无条件续算（从没停过、仍在作品区时这里是空操作）。
-        syncAutoSnapshotViewport()
         artworkViewModel.onPageVisible()
         artworkViewModel.refreshDownloadFab()
         refreshCachedOriginalPages()
     }
 
     /**
-     * 从二级大图页返回后，把进程内已缓存 ORIGINAL 的顶部大图页回填成原图。 遍历和快照/原图模式防御都在
+     * 从二级大图页返回后，把进程内已缓存 ORIGINAL 的顶部大图页回填成原图。 遍历和原图模式防御都在
      * [IllustAdapter.showCachedOriginalOverlays] 内。
      */
     private fun refreshCachedOriginalPages() {
-        if (isSnapshotMode) return
         pageAdapter?.showCachedOriginalOverlays()
     }
 
     override fun onPause() {
-        if (!isSnapshotMode) {
-            autoSnapshot.onPause(hostStillResumed = isHostStillResumed())
-            artworkViewModel.pauseDownloadFab()
-        }
+        artworkViewModel.pauseDownloadFab()
         super.onPause()
     }
 
     override fun onStop() {
-        autoSnapshot.onStop(changingConfigurations = activity?.isChangingConfigurations == true)
         super.onStop()
     }
 
     override fun onDestroyView() {
         tabletStage?.release()
         tabletStage = null
-        autoSnapshot.onDestroyView()
         composerHost = null
         muteMask = null
         actions = null
@@ -617,8 +541,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
         // 旧值 → 关注更新不再触发。区块懒加载的去重集随 sectionLoader 一起丢弃、新视图重建。
         artistObservedUserId = 0L
         sectionLoader = null
-        // helper 持有本次 rootView；Fragment 留在返回栈时必须随 View 生命周期断开引用。
-        aiHelper = null
         _fabBarController = null
         // 收起胶囊的淡出动画挂在 Choreographer 上,view 从窗口摘下来它照样 tick 到底,
         // 结束时那个 withEndAction 会去碰 chromeBind —— 此刻已是 null,checkNotNull 直接抛。
@@ -635,7 +557,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
         pageAdapter?.let {
             return it
         }
-        if (isSnapshotMode) return ensureSnapshotPageAdapter()
         if (view == null || !::retryController.isInitialized) return null
         val illust = ObjectPool.get<Illust>(illustId).value ?: return null
         if (illust.isGif()) return null // ugoira 走自己的 renderer
@@ -699,50 +620,7 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
      * 只读心形按钮：显示快照那一刻的收藏态。缓存已预热(管理页进入前会 preload)时同步取， 否则退到 IO 上读 manifest —— 不在 onViewCreated
      * 里直接碰磁盘。
      */
-    private fun applySnapshotBookmarkState() {
-        val id = snapshotId ?: return
-        SnapshotRuntimeCache.get(id)?.let {
-            fabBarController.setBookmarked(it.manifest.isBookmarked || it.illust.isBookmarked)
-            return
-        }
-        val appContext = requireContext().applicationContext
-        viewLifecycleOwner.lifecycleScope.launch {
-            val bookmarked =
-                withContext(Dispatchers.IO) {
-                    runCatching { SnapshotRepository.readManifest(appContext, id)?.isBookmarked }
-                        .getOrNull()
-                } ?: false
-            fabBarController.setBookmarked(bookmarked)
-        }
-    }
-
     /** 快照模式专用：从快照库读取 bean，并把每页图片直接指向快照本地文件。 */
-    private fun ensureSnapshotPageAdapter(): IllustAdapter? {
-        val snapshotId = snapshotId ?: return null
-        val data = SnapshotRuntimeCache.get(snapshotId) ?: return null
-        val illust = data.localizeIllust()
-        if (illust.isGif()) return null
-        val adapter: IllustAdapter =
-            if (CollapsibleIllustAdapter.shouldCollapse(illust.page_count)) {
-                createCollapsibleAdapter(illust, forceOriginal = false, onComicReaderClick = null)
-            } else {
-                IllustAdapter(requireActivity(), this, illust, pageMaxHeight(), false)
-            }
-        // 必须先打快照标记再喂本地页:adapter 构造时已经发出一趟「已下载文件」后台扫描,
-        // 标记会让它回主线程合并时整个作废,避免同 ID 的下载文件顶掉快照里的那一份。
-        adapter.setSnapshotId(snapshotId)
-        adapter.setSnapshotIsAuto(snapshotIsAuto)
-        val pageCount = illust.page_count.coerceAtLeast(1)
-        for (i in 0 until pageCount) {
-            data.pageFile(i)?.let { file -> adapter.putLocalPageUri(i, Uri.fromFile(file)) }
-        }
-        adapter.setKeepPinnedPages(true)
-        adapter.setPageStatusListener { _, _ -> }
-        adapter.setLocalPagesChangedListener(null)
-        pageAdapter = adapter
-        return adapter
-    }
-
     /** 顶部大图单页的最大展示高度,与 legacy 一致取屏高 70%。 */
     private fun pageMaxHeight(): Int = (resources.displayMetrics.heightPixels * 0.7f).toInt()
 
@@ -866,20 +744,11 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
     }
 
     /**
-     * 池 / 快照两条来源统一取当前作品的 bean;取不到给 null。
-     *
-     * 快照模式下 [illustId] 恒为 0L(快照只认 snapshotId),所以任何直接 `ObjectPool.get<Illust>(illustId)`
-     * 的地方在快照里都是静默拿到 null —— 凡是两种模式 都要用的读取都得走这里。
+     * 取当前作品的 bean（进程内对象池）；取不到给 null。
      */
-    private fun currentIllust(): Illust? {
-        return if (isSnapshotMode) {
-            snapshotId?.let { SnapshotRuntimeCache.get(it) }?.illust
-        } else {
-            ObjectPool.get<Illust>(illustId).value
-        }
-    }
+    private fun currentIllust(): Illust? = ObjectPool.get<Illust>(illustId).value
 
-    /** 池 / 快照两条来源统一取当前作品的总页数;取不到给 0。 */
+    /** 当前作品的总页数；取不到给 0。 */
     private fun currentPageCount(): Int = currentIllust()?.page_count ?: 0
 
     /** 设置「多图自动展开」(#1090)：开则数据源一次产出全 P，旋屏也不再收回。 */
@@ -924,54 +793,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
             if (items.getOrNull(lm.getPosition(listView.getChildAt(i))) is ArtworkPageItem) return true
         }
         return false
-    }
-
-    /**
-     * 视口里还有**本作品**的条目 —— 用户还在看这个作品，表该走；只剩「作者其他作品」「相关作品」
-     * 那些别人的作品了，表该挂起（见 [syncAutoSnapshotViewport]）。
-     *
-     * 用白名单而不是「还有没有 fullSpan 条目」：[ArtworkAuthorWorksItem] 与
-     * [ArtworkRelatedHeaderItem] 也是 fullSpan，按 fullSpan 判会把它们算回本作品，而按边界它们
-     * 已经出了本作品。
-     *
-     * 动图（[ArtworkUgoiraItem]）刻意不在白名单：自动快照本来就不含动图，凭证在
-     * [AutoSnapshotEngine.onArtworkPageVisible] 里就被判成 null，这里根本不会被问到。
-     *
-     * 拿不到列表 / 还没排版时按「在看」处理，退回改动前的行为 —— 否则一进页就会先挂起。
-     */
-    private fun isArtworkInViewport(): Boolean {
-        val items = feedAdapter?.currentList ?: return true
-        val listView = feedBinding.feedListView
-        val lm = listView.layoutManager ?: return true
-        if (listView.childCount == 0) return true
-        for (i in 0 until listView.childCount) {
-            when (items.getOrNull(lm.getPosition(listView.getChildAt(i)))) {
-                is ArtworkPageItem,
-                is ArtworkHeroItem,
-                is ArtworkSeriesItem,
-                is ArtworkArtistItem,
-                is ArtworkDescItem,
-                is ArtworkTagsItem,
-                is ArtworkStatsItem,
-                is ArtworkDetailPanelItem,
-                is ArtworkCommentsItem -> return true
-
-                else -> Unit
-            }
-        }
-        return false
-    }
-
-    /**
-     * 按视口把自动快照的表挂起 / 续算。挂在滚动与排版回调上（与 [refreshPageProgressPill] 同源），
-     * 所以「滚到相关作品」「滚回作品区」「从上层页返回时列表本来就停在相关作品」三种情况都覆盖。
-     *
-     * 平板不看视口、一律按「在看」：作品钉在 [ArtworkTabletStage] 里始终可见（见其类注释），信息栏滚到哪都不代表
-     * 作品离开视线；而且 [usesTabletStage] 命中时列表里压根没有页条目（见
-     * [ArtworkV3FeedSource] 的 includePages），照手机判据会一进页就挂起、整段会话都不恢复。
-     */
-    private fun syncAutoSnapshotViewport() {
-        autoSnapshot.syncViewport(isResumed) { usesTabletStage() || isArtworkInViewport() }
     }
 
     /**
@@ -1090,19 +911,12 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
     private fun openPagesPreview(): Boolean {
         val illust = currentIllust() ?: return false
         if (illust.isGif()) return false
-        val models =
-            if (isSnapshotMode) {
-                // 快照页的图在本地,缩略图别回网上取(离线打开时那边什么也拿不到)。
-                val data = snapshotId?.let { SnapshotRuntimeCache.get(it) } ?: return false
-                ArtworkThumbsSheet.localModels(illust.page_count) { data.pageFile(it) }
-            } else {
-                ArtworkThumbsSheet.networkModels(illust)
-            }
+        val models = ArtworkThumbsSheet.networkModels(illust)
         return ArtworkThumbsSheet.show(
             this,
             models,
             pageProgressIndex.coerceAtLeast(0),
-            readerIllustId = illust.id.takeUnless { isSnapshotMode },
+            readerIllustId = illust.id,
         )
     }
 
@@ -1304,7 +1118,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
         // 相关作品那一段，没有任何滚动事件，只有排版回调能发现「已经不是在看这个作品了」。
         val layoutListener = ViewTreeObserver.OnGlobalLayoutListener {
             refreshPageProgressPill()
-            syncAutoSnapshotViewport()
             publishViewportRect()
         }
         listView.addOnAttachStateChangeListener(
@@ -1658,7 +1471,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
      * 手机永远不跨，一致时是 no-op。
      */
     private fun reconcilePageItems() {
-        if (isSnapshotMode) return
         val staged = tabletStage != null
         feedViewModel.mutateItems { items ->
             val hasPages = items.any { it is ArtworkPageItem || it is ArtworkUgoiraItem }
@@ -1788,18 +1600,6 @@ class ArtworkV3Fragment : IllustFeedFragment(R.layout.fragment_artwork_v3) {
         fun newInstance(illustId: Long): ArtworkV3Fragment {
             return ArtworkV3Fragment().apply {
                 arguments = Bundle().apply { putLong("illust_id", illustId) }
-            }
-        }
-
-        @JvmStatic
-        @JvmOverloads
-        fun newInstanceSnapshot(snapshotId: String, isAuto: Boolean = false): ArtworkV3Fragment {
-            return ArtworkV3Fragment().apply {
-                arguments =
-                    Bundle().apply {
-                        putString(SnapshotManagerFragment.ARG_SNAPSHOT_ID, snapshotId)
-                        putBoolean(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, isAuto)
-                    }
             }
         }
     }

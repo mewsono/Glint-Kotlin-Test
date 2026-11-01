@@ -64,7 +64,6 @@ import ceui.pixiv.feeds.FeedRenderer
 import ceui.pixiv.feeds.feedRenderer
 import ceui.pixiv.session.SessionManager
 import ceui.pixiv.ui.comments.CommentEmojiSpanner
-import ceui.pixiv.ui.comments.translateComment
 import ceui.pixiv.ui.user.binding_loadUserIcon
 import ceui.pixiv.utils.buildPinnedTagPreviewJson
 import ceui.pixiv.utils.ppppx
@@ -266,7 +265,7 @@ internal fun ArtworkV3Fragment.heroRenderer() =
         inflate = SectionV3HeroBinding::inflate,
         fullSpan = true,
         bindPayloads = { cell, payloads ->
-            isTranslatingStateOnly(payloads).also { if (it) bindMetaTranslateState(cell.binding) }
+            Unit
         },
     ) { cell ->
         val illust = cell.item.illust
@@ -285,18 +284,8 @@ internal fun ArtworkV3Fragment.heroRenderer() =
         b.metaDate.text = Common.getLocalYYYYMMDDHHMMString(illust.create_date)
         b.metaPages.text = if (illust.page_count == 1) ctx.getString(R.string.v3_page_count_one)
         else ctx.getString(R.string.v3_page_count_many, illust.page_count)
-        // 信息区翻译按钮：仅当作品无简介时显示。有简介的作品简介区已提供翻译按钮
-        //（见 descRenderer），而简介区整体只在 caption 非空时才产出（见
-        // ArtworkV3FeedSource.buildArtworkHeaderItems），无简介时这里补一个翻译标题的入口。
-        b.metaTranslateContainer.isVisible = cell.item.showTranslate
-        bindMetaTranslateState(b)
-        b.metaTranslate.setOnClickListener {
-            if (isTranslating) return@setOnClickListener
-            setTranslatingState(true)
-            translateTitleAndCaption(illust.title, null) { loading ->
-                setTranslatingState(loading)
-            }
-        }
+        // AI 标题 / 简介翻译已随 `lean` 删除：信息区与简介区的翻译入口都不再出现。
+        b.metaTranslateContainer.isVisible = false
     }
 
 internal fun ArtworkV3Fragment.seriesRenderer() =
@@ -335,7 +324,7 @@ internal fun ArtworkV3Fragment.descRenderer() =
         fullSpan = true,
         recycle = { cell -> clearPendingDescPreDraw(cell.binding) },
         bindPayloads = { cell, payloads ->
-            isTranslatingStateOnly(payloads).also { if (it) bindDescTranslateState(cell.binding) }
+            Unit
         },
     ) { cell ->
         // HTML 解析对长 caption 不便宜;caption 不变(滚动来回重绑)就跳过重解析。
@@ -359,30 +348,7 @@ internal fun ArtworkV3Fragment.descRenderer() =
         b.descDownload.setOnClickListener {
             downloadDescCaption()
         }
-        bindDescTranslateState(b)
-        b.descTranslate.setOnClickListener {
-            if (isTranslating) return@setOnClickListener
-            val plain = (descFullCaption ?: HtmlCompat.fromHtml(
-                cell.item.caption, HtmlCompat.FROM_HTML_MODE_COMPACT
-            )).toString().trim()
-            setTranslatingState(true)
-            translateTitleAndCaption(cell.item.title, plain) { loading ->
-                setTranslatingState(loading)
-            }
-        }
     }
-
-private fun ArtworkV3Fragment.bindMetaTranslateState(b: SectionV3HeroBinding) {
-    b.metaTranslate.isInvisible = isTranslating
-    b.metaTranslate.isEnabled = !isTranslating
-    b.metaTranslateProgress.isVisible = isTranslating
-}
-
-private fun ArtworkV3Fragment.bindDescTranslateState(b: SectionV3DescriptionBinding) {
-    b.descTranslate.isInvisible = isTranslating
-    b.descTranslate.isEnabled = !isTranslating
-    b.descTranslateProgress.isVisible = isTranslating
-}
 
 /** 简介折叠阈值(#965):超过这个行数才折,issue 建议 3~5 行,取上限。 */
 private const val DESC_COLLAPSED_LINES = 5
@@ -745,29 +711,9 @@ internal fun ArtworkV3Fragment.commentsRenderer() =
 
         fun openCommentList() {
             val intent = Intent(ctx, TemplateActivity::class.java)
-            if (isSnapshotMode) {
-                // 没勾「包含评论」的快照点进来只会是一页空列表；经典详情页已经就地提示了，
-                // V3 这边跟上，别让用户白跳一次。
-                val snapshot = snapshotId?.let { ceui.pixiv.snapshot.SnapshotRuntimeCache.get(it) }
-                if (snapshot?.comments == null) {
-                    Common.showToast(ctx.getString(R.string.snapshot_no_comments_toast))
-                    return
-                }
-                intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.SNAPSHOT_COMMENTS.key)
-                // CommentsFragment 的 args 按 getLong 读，这里 illustId 已是 Long。
-                // objectArthurId 一旦是 0，CommentFeedItem.isAuthor 恒 false，作者本人的评论就不再有「作者」标记。
-                intent.putExtra("objectId", item.illustId)
-                intent.putExtra("objectArthurId", item.illustAuthorId)
-                intent.putExtra("objectType", ceui.pixiv.api.model.ObjectType.ILLUST)
-                intent.putExtra(
-                    ceui.pixiv.snapshot.SnapshotManagerFragment.ARG_SNAPSHOT_ID,
-                    snapshotId,
-                )
-            } else {
                 intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.COMMENTS.key)
                 intent.putExtra(Params.ILLUST_ID, item.illustId)
                 intent.putExtra(Params.ILLUST_TITLE, item.illustTitle)
-            }
             ctx.startActivity(intent)
         }
 
@@ -854,9 +800,6 @@ private fun ArtworkV3Fragment.renderCommentsPreview(
                     if (!text.isNullOrBlank()) {
                         item(ctx.getString(R.string.string_173), R.drawable.baseline_content_copy_24) {
                             ClipBoardUtils.putTextIntoClipboard(ctx, text)
-                        }
-                        item(ctx.getString(R.string.string_translate_caption), R.drawable.ic_baseline_translate_24) {
-                            translateComment(text)
                         }
                     }
                     item(ctx.getString(R.string.string_174), R.drawable.ic_supervisor_account_black_24dp) {

@@ -23,16 +23,12 @@ import ceui.lisa.utils.ShareIllust
 import ceui.pixiv.api.model.Illust
 import ceui.pixiv.cache.ObjectPool
 import ceui.pixiv.download.DownloadRecordStateSource
-import ceui.pixiv.snapshot.showSnapshotCreateDialog
 import ceui.pixiv.ui.bookmark.SelectTagBottomSheet
 import ceui.pixiv.ui.detail.frames.openUgoiraFrames
 import ceui.pixiv.ui.muted.MuteTagSheet
 import ceui.pixiv.ui.navigation.TemplateRoute
 import ceui.pixiv.ui.share.saveArtworkPoster
 import ceui.pixiv.ui.share.shareFirstImage
-import ceui.pixiv.ui.upscale.IllustAiHelper
-import ceui.pixiv.ui.upscale.ModelPickerDialog
-import ceui.pixiv.ui.upscale.RembgModelPickerDialog
 import ceui.pixiv.utils.playToggleHaptic
 import ceui.pixiv.utils.setOnClick
 import ceui.pixiv.ui.filter.openImageFilter
@@ -57,7 +53,6 @@ internal class ArtworkV3Actions(
     private val viewModel: ArtworkV3ViewModel,
     private val fabBar: V3FabBarController,
     private val currentPageIndex: () -> Int,
-    private val aiHelper: () -> IllustAiHelper?,
     private val onOpenComicReader: () -> Unit,
     private val onForceOriginal: () -> Unit,
 ) {
@@ -231,9 +226,6 @@ internal class ArtworkV3Actions(
             item(context.getString(R.string.string_355_2), R.drawable.ic_baseline_launch_24) {
                 Common.copy(context, ShareIllust.URL_Head + illust.id)
             }
-            item(context.getString(R.string.snapshot_create), R.drawable.ic_baseline_get_app_20) {
-                fragment.showSnapshotCreateDialog(illust)
-            }
             // issue #898 / #515:详情页直接设壁纸(首图),不必先进全屏看图页。动图 original 是 zip,跳过。
             if (!illust.isGif()) {
                 item(
@@ -265,40 +257,9 @@ internal class ArtworkV3Actions(
                 item(context.getString(R.string.string_0), R.drawable.ic_remove_red_eye_black_24dp) {
                     onForceOriginal()
                 }
-                item(context.getString(R.string.string_ai_upscale), R.drawable.ic_upscale_add_photo) {
-                    ModelPickerDialog.pickOrUseDefault(fragment.childFragmentManager) { model ->
-                        aiHelper()?.performUpscale(illust, model)
-                    }
-                }
-                item(context.getString(R.string.string_ai_rembg), R.drawable.ic_baseline_filter_24) {
-                    RembgModelPickerDialog.pickOrUseDefault(fragment.childFragmentManager) { model ->
-                        aiHelper()?.performRembg(illust, model)
-                    }
-                }
                 item(context.getString(R.string.image_filter), R.drawable.ic_photo_filter_24) {
                     // 多图作品按页码浮标当前指向的那一页；已经滑进简介区时回退首图（同海报）。
                     openImageFilter(context, illust, currentPageIndex().coerceAtLeast(0))
-                }
-            }
-            if (Dev.showPlazaShareInArtwork) {
-                item(
-                    context.getString(R.string.plaza_share_illust_to_plaza),
-                    R.drawable.ic_plaza_feed_24,
-                ) {
-                    val intent = Intent(context, TemplateActivity::class.java)
-                    intent.putExtra(
-                        TemplateActivity.EXTRA_FRAGMENT,
-                        TemplateRoute.PLAZA_COMPOSE.key,
-                    )
-                    intent.putExtra(
-                        ceui.pixiv.plaza.ui.PlazaComposeFragment.ARG_PREFILL_ILLUST_ID,
-                        illust.id,
-                    )
-                    intent.putExtra(
-                        ceui.pixiv.plaza.ui.PlazaComposeFragment.ARG_OBJECT_TYPE,
-                        if (illust.type == "manga") "manga" else "illust",
-                    )
-                    fragment.startActivity(intent)
                 }
             }
         }
