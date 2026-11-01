@@ -4,9 +4,6 @@ import android.content.Context
 import android.net.Uri
 import ceui.pixiv.api.model.Illust
 import ceui.pixiv.download.DownloadedPageIndex
-import ceui.pixiv.snapshot.SNAPSHOT_LOCAL_URL_PREFIX
-import ceui.pixiv.snapshot.parseSnapshotLocalUrl
-import ceui.pixiv.snapshot.snapshotAssetFile
 import java.io.File
 
 /**
@@ -91,15 +88,6 @@ object PageImageSourceResolver {
 
     /** 第 1 条：url 自身是不是本地形态。不是则返回 null，交给后面的规则。 */
     private fun localUrlSource(url: String): PageImageSource.Local? = when {
-        url.startsWith(SNAPSHOT_LOCAL_URL_PREFIX) -> {
-            // 快照存档就在私有目录里，能直接给出真实文件 —— 取文件型消费方因此零拷贝，
-            // 渲染型消费方也拿得到 Sketch / Glide 都认的 File。
-            val file = parseSnapshotLocalUrl(url)?.let { (snapshotId, rel) ->
-                snapshotAssetFile(snapshotId, rel)
-            }
-            PageImageSource.Local(Uri.parse(url), file, PageImageSource.Origin.LocalUrl)
-        }
-
         // 下载详情模式（DoneListV3Fragment 把记录里的 filePath 当 url 塞进来）。
         // content://（MediaStore / SAF）没有真实文件，只有可读流 —— 需要 File 时由
         // PageImageSource.awaitFile() 拷一份，渲染层照旧零拷贝。

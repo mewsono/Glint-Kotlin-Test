@@ -16,7 +16,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import ceui.lisa.R
 import ceui.lisa.activities.ImageDetailActivity
-import ceui.lisa.activities.ImageTranslationViewModel
 import ceui.lisa.activities.Shaft
 import ceui.lisa.databinding.FragmentImageDetailBinding
 import ceui.lisa.download.IllustDownload
@@ -32,13 +31,11 @@ import ceui.pixiv.imageloader.ImageLoaderV3
 import ceui.pixiv.imageloader.PageImageSourceResolver
 import ceui.pixiv.imageloader.awaitFile
 import ceui.pixiv.imageloader.observeState
-import ceui.pixiv.plaza.ui.showPlazaError
 import ceui.pixiv.services.appServices
 import ceui.pixiv.ui.common.deleteImageById
 import ceui.pixiv.ui.common.getImageIdInGallery
 import ceui.pixiv.ui.common.saveImageToGallery
 import ceui.pixiv.ui.detail.UgoiraPlayerView
-import ceui.pixiv.ui.translate.MangaOcrModel
 import ceui.pixiv.ui.works.ToggleToolnarViewModel
 import ceui.pixiv.utils.setOnClick
 import com.github.panpf.sketch.loadImage
@@ -71,8 +68,6 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
     private var saveName: String? = null
     private val viewModel by
         viewModels<ToggleToolnarViewModel>(ownerProducer = { requireActivity() })
-    private val translationViewModel by
-        viewModels<ImageTranslationViewModel>(ownerProducer = { requireActivity() })
     private var isAnimated: Boolean = false
     private var isScaleMax: Boolean = false
 
@@ -89,7 +84,6 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
      * [onDestroyView] 的注释）。
      */
     private var lastZoomContentSize: IntSizeCompat = IntSizeCompat.Zero
-    private var plazaLoadJob: kotlinx.coroutines.Job? = null
     private var imageDisposable: Disposable? = null
     // large 占位任务的观察句柄：原图就绪后摘掉，避免晚到的 large 回盖已显示的原图。
     private var largeDisposable: Disposable? = null
@@ -101,9 +95,6 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
     // 导致 TransactionTooLargeException。统一向 ImageDetailActivity 取。
     private val mIllust: Illust?
         get() = (activity as? ImageDetailActivity)?.mIllust
-
-    private val isSnapshotMode: Boolean
-        get() = (activity as? ImageDetailActivity)?.isSnapshotMode == true
 
     /**
      * 延迟派发过来的手势回调，现在还能不能安全地碰 fragment 的东西。
@@ -125,16 +116,15 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
     /**
      * 在还 attach 着的时候把两个 activity 作用域的 VM lazy 兑现掉。
      *
-     * [viewModel] / [translationViewModel] 的 ownerProducer 是 `requireActivity()`，只在 lazy
-     * **首次**取值时执行一次；取到后 ViewModelLazy 缓存实例，之后再取不碰 attach 状态。崩溃的成因 正是「首次取值发生在 detach 之后」——
-     * [translationViewModel] 在 onViewCreated 就被取过所以从没崩， [viewModel] 只被手势回调用到，首次取值就是那条延迟派发的消息本身。
+     * [viewModel] 的 ownerProducer 是 `requireActivity()`，只在 lazy **首次**取值时执行一次；取到后
+     * ViewModelLazy 缓存实例，之后再取不碰 attach 状态。崩溃的成因正是「首次取值发生在 detach 之后」
+     * —— [viewModel] 只被手势回调用到，首次取值就是那条延迟派发的消息本身。
      *
      * onAttach 时 host 已就绪，在这里取值把首次取值点钉死在生命周期内，之后无论什么延迟回调打进来 都只是拿缓存实例，不会再抛 ISE。
      */
     override fun onAttach(context: Context) {
         super.onAttach(context)
         viewModel
-        translationViewModel
     }
 
     /**
@@ -159,8 +149,6 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
             resetZoomLevelMemory()
             lastZoomContentSize = IntSizeCompat.Zero
         }
-        plazaLoadJob?.cancel()
-        plazaLoadJob = null
         // 下次 onViewCreated 由译图观察重放重新判定,别让旧路径挡住新 view 上的译图
         shownTranslatedPath = null
         super.onDestroyView()
@@ -282,13 +270,10 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
     }
 
     /**
-     * 圈选翻译框选层是否正亮着。供宿主（大图页）的统一闸口查询，决定是否拦下拖动退出 ——
-     * 框选层亮着时手势归它，不该穿透下去把整页拖走。
+     * 圈选翻译（AI）已随 `lean` 删除，框选层和它对应的触摸闸口都不存在了，这里恒为 false：
+     * 宿主的拖动退出闸口照旧调用，不需要知道这个功能没了。
      */
-    fun isManualSelectionActive(): Boolean {
-        if (view == null || baseBind == null) return false
-        return baseBind.manualSelectionOverlay.visibility == View.VISIBLE
-    }
+    fun isManualSelectionActive(): Boolean = false
 
     public override fun initBundle(bundle: Bundle) {
         url = bundle.getString(Params.URL)
@@ -520,139 +505,21 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
         }
         loadImage()
         observeViewerZoom()
-        // 监听"翻译漫画"产出 + 「显示译图」勾选:本页有要显示的译图就换上,取消勾选则切回原图
-        translationViewModel.displayedTranslatedPaths.observe(viewLifecycleOwner) { map ->
-            val path = map[index]?.takeIf { File(it).exists() }
-            when {
-                path != null -> {
-                    if (path == shownTranslatedPath) return@observe
-                    shownTranslatedPath = path
-                    baseBind.progressCircular.visibility = View.GONE
-                    baseBind.image.loadImage(File(path))
-                }
-                shownTranslatedPath != null -> {
-                    shownTranslatedPath = null
-                    loadImage()
-                }
-            }
-        }
-        // 「圈选翻译」请求:命中本页 index 才进圈选模式,进完立刻消费防重复触发
-        translationViewModel.manualSelectionRequest.observe(viewLifecycleOwner) { req ->
-            if (req != null && req == index) {
-                translationViewModel.consumeManualSelectionRequest()
-                enterManualSelection()
-            }
-        }
     }
 
     /** 进圈选模式:亮出框选层接管触摸,画完一框就退出并交给 VM 翻译。 */
-    private fun enterManualSelection() {
-        if (
-            translationViewModel.running.value == true ||
-                requireContext().appServices().mangaBatchTranslateCenter.isRunning
-        ) {
-            Toaster.showShort(R.string.string_ai_translate_in_progress)
-            return
-        }
-        val box = baseBind.selectionBoxView
-        box.reset()
-        box.onSelected = { rect ->
-            exitManualSelection()
-            handleSelectedBox(rect)
-        }
-        box.onCancelled = { exitManualSelection() }
-        baseBind.manualSelectionCancel.setOnClick { exitManualSelection() }
-        val overlay = baseBind.manualSelectionOverlay
-        overlay.alpha = 0f
-        overlay.visibility = View.VISIBLE
-        overlay.animate().alpha(1f).setDuration(200).start()
-    }
-
-    private fun exitManualSelection() {
-        val overlay = baseBind.manualSelectionOverlay
-        if (overlay.visibility != View.VISIBLE) return
-        overlay
-            .animate()
-            .alpha(0f)
-            .setDuration(200)
-            .withEndAction {
-                overlay.visibility = View.GONE
-            }
-            .start()
-    }
-
-    /**
-     * 把框选层吐回的「View 坐标系矩形」用 zoomimage 的 transform 换算成「内容坐标」, 再除以 contentSize 归一化到 [0,1] ——
-     * 这样与显示图实际分辨率、当前缩放都无关, VM 拿到归一化矩形按底图分辨率还原即可。最后解析原图 File 交给 VM 翻译。
-     */
-    private fun handleSelectedBox(screenRect: RectF) {
-        val illust = mIllust ?: return
-        val zoomable = baseBind.image.zoomable
-        val size = zoomable.contentSizeState.value
-        if (size.width <= 0 || size.height <= 0) {
-            Toaster.showShort(R.string.string_ai_manga_translate_failed)
-            return
-        }
-        // 选区太小(细长误触)直接拦下,免得 OCR 拿到一条线
-        val minPx = 16f * resources.displayMetrics.density
-        if (screenRect.width() < minPx || screenRect.height() < minPx) {
-            Toaster.showShort(R.string.string_ai_manga_manual_too_small)
-            return
-        }
-        val tl = zoomable.touchPointToContentPointF(OffsetCompat(screenRect.left, screenRect.top))
-        val br =
-            zoomable.touchPointToContentPointF(OffsetCompat(screenRect.right, screenRect.bottom))
-        val l = (minOf(tl.x, br.x) / size.width).coerceIn(0f, 1f)
-        val t = (minOf(tl.y, br.y) / size.height).coerceIn(0f, 1f)
-        val r = (maxOf(tl.x, br.x) / size.width).coerceIn(0f, 1f)
-        val b = (maxOf(tl.y, br.y) / size.height).coerceIn(0f, 1f)
-
-        val imageUrl =
-            IllustDownload.getUrl(illust, index, Params.IMAGE_RESOLUTION_ORIGINAL)
-                ?: IllustDownload.getUrl(illust, index, Params.IMAGE_RESOLUTION_LARGE)
-                ?: return
-        // 圈选松手那一刻不能把用户丢进静默等待：只认本地（已缓存 / 已下载 / 本地 URL），
-        // allowNetwork = false 保证一个网络动作都不发，未命中就立刻给结果。
-        viewLifecycleOwner.lifecycleScope.launch {
-            val ctx = context ?: return@launch
-            val file =
-                PageImageSourceResolver.resolve(ctx, illust, index, imageUrl, allowNetwork = false)
-                    .awaitFile(ctx)
-            if (file == null) {
-                Toaster.showShort(R.string.string_ai_image_not_ready)
-                return@launch
-            }
-            val started =
-                translationViewModel.startManualRegion(
-                    file,
-                    index,
-                    l,
-                    t,
-                    r,
-                    b,
-                    MangaOcrModel.MANGA_OCR_BASE,
-                )
-            if (!started) {
-                Toaster.showShort(R.string.string_ai_translate_in_progress)
-            }
-        }
-    }
-
     /**
      * 二级看图页的取图分流。**有意不走 [PageImageSourceResolver]** —— 这里的三段式与那套四规则等价，
      * 而重写它要动 zoomimage 的 transform 状态、large→原图竞态（[originalShown] / [largeDisposable]）
      * 与观察者生命周期，收益只是少两个守卫，不划算。逐条对应关系（改这里前请先核对还成立）：
      *
      * - 第 1 段 `content://` 特判 ＝ 规则 1
-     * - `isSnapshotMode` 守卫 ＝ 规则 1 的 `shaftsnap://`。快照把 url 改写成存档地址，渲染层由 Glide
-     *   本地读，所以快照模式**不会**发网络请求；守卫的真正作用是「别让下载记录顶掉存档」。
      * - `peekFile(imageUrl) == null` 前置 ＝ 规则 2。原图已在任务表里就跳过查库走同步快路径，零 DB 开销。
      * - 协程里的 `DownloadedPageIndex.page()` ＝ 规则 3
      * - 兜底 `loadFromNetwork` ＝ 规则 4
      *
-     * 所以这四种情况都不会出现「本地已有却单飞网络请求」。**前提**是上面的等价关系不被改坏 ——
-     * 一旦给 `isSnapshotMode` 加了别的语义、或 url 模式开始出现 Glide 认不出的本地路径形态，
-     * 就得回头把这段换成 `resolve()`。
+     * 所以这几种情况都不会出现「本地已有却单飞网络请求」。**前提**是上面的等价关系不被改坏 ——
+     * 一旦 url 模式开始出现 Glide 认不出的本地路径形态，就得回头把这段换成 `resolve()`。
      */
     private fun loadImage() {
         baseBind.emptyFrame.visibility = View.GONE
@@ -660,16 +527,10 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
         originalShown = false
         largeDisposable?.dispose()
         largeDisposable = null
-        val plazaSource = (activity as? ImageDetailActivity)?.plazaImageSource
-        if (plazaSource != null) {
-            loadPlazaImage(plazaSource)
-            return
-        }
         val animatedIllust = mIllust?.takeIf { it.isGif() }
         if (animatedIllust != null) {
             ugoiraPlayer?.bind(
                 viewLifecycleOwner, animatedIllust, maxHeight = 0, fitToViewport = true,
-                offline = (activity as? ImageDetailActivity)?.snapshotUgoira,
             )
             return
         }
@@ -702,8 +563,7 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
         // 快路径，零 DB 开销、即时显示；真正要修的「下载过但查看器没缓存」才值得多查一次库。
         val illust = mIllust
         if (
-            !isSnapshotMode &&
-                !isUrlMode &&
+            !isUrlMode &&
                 illust != null &&
                 !illust.isGif() &&
                 ImageLoaderV3.peekFile(imageUrl) == null
@@ -779,30 +639,6 @@ class FragmentImageDetail : BaseFragment<FragmentImageDetailBinding?>() {
                 }
             )
         }
-    }
-
-    private fun loadPlazaImage(source: ceui.pixiv.plaza.ui.PlazaImageSource) {
-        plazaLoadJob?.cancel()
-        baseBind.progressCircular.visibility = View.VISIBLE
-        baseBind.image.contentDescription =
-            getString(R.string.plaza_image_zoom_accessibility, index + 1)
-        plazaLoadJob =
-            viewLifecycleOwner.lifecycleScope.launch {
-                try {
-                    val file = source.file(requireContext(), index)
-                    originalShown = true
-                    baseBind.image.loadImage(file)
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    val message = ceui.pixiv.plaza.ui.plazaError(error)
-                    baseBind.emptyTitle.text = message.resolve(requireContext())
-                    baseBind.emptyFrame.visibility = View.VISIBLE
-                    if (isResumed) requireContext().showPlazaError(message)
-                } finally {
-                    if (isActive) baseBind.progressCircular.visibility = View.GONE
-                }
-            }
     }
 
     private fun loadFromNetwork(imageUrl: String, isUrlMode: Boolean) {
