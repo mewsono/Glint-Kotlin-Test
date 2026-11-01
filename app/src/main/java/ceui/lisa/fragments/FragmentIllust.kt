@@ -82,17 +82,8 @@ import ceui.pixiv.utils.combineLatest
 import ceui.pixiv.utils.toTagsBeans
 import ceui.loxia.User
 import ceui.pixiv.ui.flag.FlagDescFragment
-import ceui.pixiv.snapshot.AutoSnapshotEngine
-import ceui.pixiv.snapshot.AutoSnapshotRepository
-import ceui.pixiv.snapshot.SnapshotManagerFragment
-import ceui.pixiv.snapshot.SnapshotRepository
-import ceui.pixiv.snapshot.SnapshotRuntimeCache
-import ceui.pixiv.snapshot.SnapshotViewerData
-import ceui.pixiv.snapshot.localizeIllust
-import ceui.pixiv.snapshot.showSnapshotCreateDialog
 import ceui.pixiv.ui.share.shareFirstImage
 import ceui.pixiv.ui.share.saveArtworkPoster
-import ceui.pixiv.ui.upscale.IllustAiHelper
 import ceui.pixiv.utils.FrameQueue
 import ceui.pixiv.utils.buildPinnedTagPreviewJson
 import ceui.pixiv.utils.isHostStillResumed
@@ -111,29 +102,13 @@ import timber.log.Timber
 import ceui.pixiv.ui.navigation.TemplateRoute
 
 class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
-    private var autoSnapshotVisit: AutoSnapshotEngine.ArtworkVisit? = null
-
-    /**
-     * 本页实例是否已经计过一次「进入」：切后台回来、横滑滑回都不重复计。
-     * 过 onSaveInstanceState 带过旋屏重建 —— 否则旋几次就能凭空凑满「反复进入」阈值。
-     */
-    private var autoSnapshotEntered = false
-
-    /**
-     * 本页被横滑降级（onPause 时宿主仍 RESUMED）、还没被滑回来。这样的页视觉上已经离开，
-     * 旋屏时也要评估 —— 否则它挂起着的那段停留只结算不评估，触发就丢了。
-     */
-    private var autoSnapshotDemoted = false
-
     private val safeArgs by lazy { IllustArgs(requireArguments()) }
 
-    private val snapshotId: String? get() = arguments?.getString(SnapshotManagerFragment.ARG_SNAPSHOT_ID)
-    private val snapshotIsAuto: Boolean
-        get() = arguments?.getBoolean(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, false) ?: false
-    private val isSnapshotMode: Boolean get() = snapshotId != null
-    private var snapshotViewerData: SnapshotViewerData? = null
-    private var snapshotBean: Illust? = null
-    private var snapshotUser: User? = null
+    /**
+     * 快照详情（连同它的只读模式）已随 `lean` 删除。经典详情页里还留着若干「快照下禁点」的守卫，
+     * 保留这个名字让它们继续以「不可能成立」的形式存在，而不是再散落一堆 `if (false)`。
+     */
+    private val isSnapshotMode: Boolean get() = false
 
     private class IllustArgs(b: Bundle) {
         // 兼容读：进程重建时恢复的 arguments 可能是旧版本按 Int 写入的
@@ -144,7 +119,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
     }
     private var mReceiver: CallBackReceiver? = null
     private var recyHeight = 0
-    private var aiHelper: IllustAiHelper? = null
 
     // 两块「首帧必然不可见」的 chrome 的懒 inflate 状态（与 ArtworkV3Fragment 同一套）：
     // AI 覆盖层（11 个 View）只在跑 AI 任务时用；屏蔽遮罩（≈8 个 View，含 SpoilerBlurView 的
@@ -246,7 +220,7 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
      * 还没加载出来时给 0，匹配自然落空（安全降级）。
      */
     private val viewerLinkIllustId: Long
-        get() = if (isSnapshotMode) snapshotBean?.id ?: 0L else safeArgs.illustId
+        get() = safeArgs.illustId
     private val pageProgressLocation = IntArray(2)
     /** 页码浮标当前指着哪一页(0 基);浮标不在场时为 -1。长按预览拿它当高亮/初始滚动位。 */
     private var pageProgressIndex = -1
@@ -267,12 +241,7 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
         FragmentIllustBinding.bind(root)
 
     override fun initView() {
-        // 导航栏占位要在快照 early-return 之前挂好,否则离线快照页底栏压在手势条上。
         applyNavigationBarInset()
-        if (isSnapshotMode) {
-            setupSnapshotView()
-            return
-        }
         val illustLiveData = ObjectPool.get<Illust>(safeArgs.illustId)
         illustLiveData.observe(viewLifecycleOwner) { illust ->
             updateIllust(illust)
@@ -332,102 +301,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
     }
 
     // ── 快照只读模式（实验）──────────────────────────────────────────────
-    private fun setupSnapshotView() {
-        val id = snapshotId ?: return
-        val cached = SnapshotRuntimeCache.get(id)
-        if (cached != null) {
-            bindSnapshotView(cached)
-            return
-        }
-        val appContext = requireContext().applicationContext
-        viewLifecycleOwner.lifecycleScope.launch {
-            // 快照可能已被管理页删掉 / manifest 损坏 —— loadViewerData 会抛。
-            // 裸 launch 里逃逸的异常直接崩进程,这里就地兜住:提示 + 关页。
-            val loaded = try {
-                withContext(Dispatchers.IO) {
-                    if (snapshotIsAuto) {
-                        AutoSnapshotRepository.loadAutoViewerData(appContext, id)
-                    } else {
-                        SnapshotRepository.loadViewerData(appContext, id)
-                    }
-                }
-            } catch (ce: kotlinx.coroutines.CancellationException) {
-                throw ce
-            } catch (e: Exception) {
-                Timber.w(e, "[Snapshot] open classic viewer failed, id=%s", id)
-                Common.showToast(getString(R.string.snapshot_open_failed, e.message ?: ""))
-                finish()
-                return@launch
-            }
-            SnapshotRuntimeCache.put(id, loaded)
-            bindSnapshotView(loaded)
-        }
-    }
-
-    private fun bindSnapshotView(data: SnapshotViewerData) {
-        snapshotViewerData = data
-        snapshotBean = data.localizeIllust()
-        snapshotUser = snapshotBean?.user
-        // 独立快照数据通道：不写 ObjectPool，只使用本地字段驱动渲染。
-        val bean = snapshotBean ?: return
-        updateIllust(bean)
-        bean.user?.let { updateUser(it) }
-        applySnapshotReadOnlyOverrides()
-    }
-
-    private fun applySnapshotReadOnlyOverrides() {
-        val data = snapshotViewerData ?: return
-        baseBind.download.text = getString(R.string.snapshot_downloaded_label)
-        baseBind.download.setOnClickListener(null)
-        baseBind.download.setOnLongClickListener(null)
-
-        baseBind.postLike.setOnClickListener { snapshotUnsupportedToast() }
-        baseBind.postLike.setOnLongClickListener { snapshotUnsupportedToast(); true }
-        // 信息区是 ViewStub。本函数在 bindSnapshotView 里紧跟 updateIllust 之后跑，通常已经建好；
-        // 万一视图还没 RESUMED（会被延后一个消息），它建好时会自己补上这条拦截（见 setupInfoSection）。
-        if (secondLinearView != null) {
-            illustLikeView.setOnClickListener { snapshotUnsupportedToast() }
-        }
-        baseBind.follow.setOnClickListener { snapshotUnsupportedToast() }
-        baseBind.unfollow.setOnClickListener { snapshotUnsupportedToast() }
-        baseBind.relaIllustBrief.setOnClickListener { snapshotUnsupportedToast() }
-        baseBind.userName.setOnClickListener { snapshotUnsupportedToast() }
-        baseBind.userName.setOnLongClickListener { snapshotUnsupportedToast(); true }
-        baseBind.related.setOnClickListener { snapshotUnsupportedToast() }
-
-        baseBind.comment.setOnClickListener {
-            if (data.comments != null) {
-                openSnapshotComments()
-            } else {
-                Common.showToast(getString(R.string.snapshot_no_comments_toast))
-            }
-        }
-    }
-
-    private fun snapshotUnsupportedToast() {
-        Common.showToast(getString(R.string.snapshot_unsupported_toast))
-    }
-
-    private fun openSnapshotComments() {
-        val data = snapshotViewerData ?: return
-        val intent = Intent(mContext, TemplateActivity::class.java)
-        intent.putExtra(TemplateActivity.EXTRA_FRAGMENT, TemplateRoute.SNAPSHOT_COMMENTS.key)
-        intent.putExtra("objectId", data.illust.id)
-        intent.putExtra("objectArthurId", data.illust.user?.id ?: 0L)
-        intent.putExtra("objectType", ceui.pixiv.api.model.ObjectType.ILLUST)
-        intent.putExtra(SnapshotManagerFragment.ARG_SNAPSHOT_ID, snapshotId)
-        intent.putExtra(SnapshotManagerFragment.ARG_SNAPSHOT_IS_AUTO, snapshotIsAuto)
-        startActivity(intent)
-    }
-
-    private fun applySnapshotLocalPages(adapter: IllustAdapter) {
-        val data = snapshotViewerData ?: return
-        val pageCount = data.illust.page_count.coerceAtLeast(1)
-        for (i in 0 until pageCount) {
-            data.pageFile(i)?.let { file -> adapter.putLocalPageUri(i, Uri.fromFile(file)) }
-        }
-    }
-
     /**
      * 被屏蔽遮罩的懒 inflate（理由见字段处注释）。触发点 = 屏蔽 observer 第一次报「有屏蔽记录」。
      *
@@ -446,13 +319,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
                 it.hideProgress()
             }
         }
-    }
-
-    /** AI 画质增强 / 智能抠图覆盖层的懒 inflate。触发点 = [IllustAiHelper] 各入口。 */
-    private fun ensureAiOverlay() {
-        if (aiOverlayReady) return
-        aiOverlayReady = true
-        aiOverlayStub.inflate()
     }
 
     private fun observeMuteStatus(illust: Illust) {
@@ -518,7 +384,7 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
      * 关注镜像校正一次 —— 只升不降，见 [reconcileViewerStateFromMirror]。写回池之后，上面的
      * Illust 观察者与 User 观察者会各自重绘爱心和作者栏，这里不需要再动 View。
      *
-     * 快照模式不走池（[setupSnapshotView] 直接渲染 snapshotBean），在 initView 里已经提前返回。
+     * 取的是池里的 bean（快照模式已随 `lean` 删除）。
      */
     private fun reconcileViewerStateOnce(illust: Illust) {
         if (viewerStateReconciled) return
@@ -759,10 +625,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
             saveArtworkPoster(illust, pageProgressIndex.coerceAtLeast(0))
             true
         }
-        R.id.action_snapshot -> {
-            showSnapshotCreateDialog(illust)
-            true
-        }
         R.id.action_dislike -> {
             MuteTagSheet.show(childFragmentManager, illust.tags?.toTagsBeans(), illust.user)
             true
@@ -791,18 +653,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
             intent.putExtra(FlagDescFragment.FlagObjectIdKey, illust.id)
             intent.putExtra(FlagDescFragment.FlagObjectTypeKey, ObjectSpec.POST)
             startActivity(intent)
-            true
-        }
-        R.id.action_ai_upscale -> {
-            ceui.pixiv.ui.upscale.ModelPickerDialog.pickOrUseDefault(childFragmentManager) { model ->
-                aiHelper?.performUpscale(illust, model)
-            }
-            true
-        }
-        R.id.action_ai_rembg -> {
-            ceui.pixiv.ui.upscale.RembgModelPickerDialog.pickOrUseDefault(childFragmentManager) { model ->
-                aiHelper?.performRembg(illust, model)
-            }
             true
         }
         else -> false
@@ -979,13 +829,7 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
             if (v.alpha < 0.5f) return@setOnLongClickListener false
             val illust = currentIllust() ?: return@setOnLongClickListener false
             if (illust.isGif()) return@setOnLongClickListener false
-            val models = if (isSnapshotMode) {
-                // 快照页的图在本地,缩略图别回网上取(离线打开时那边什么也拿不到)。
-                val data = snapshotViewerData ?: return@setOnLongClickListener false
-                ArtworkThumbsSheet.localModels(illust.page_count) { data.pageFile(it) }
-            } else {
-                ArtworkThumbsSheet.networkModels(illust)
-            }
+            val models = ArtworkThumbsSheet.networkModels(illust)
             if (!ArtworkThumbsSheet.show(
                     this,
                     models,
@@ -1005,10 +849,8 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
         }
     }
 
-    /** 池 / 快照两条来源统一取当前作品的 bean。快照不写 ObjectPool,只有本地字段那一份。 */
-    private fun currentIllust(): Illust? =
-        if (isSnapshotMode) snapshotBean
-        else ObjectPool.get<Illust>(safeArgs.illustId).value
+    /** 当前作品的 bean（进程内对象池）。 */
+    private fun currentIllust(): Illust? = ObjectPool.get<Illust>(safeArgs.illustId).value
 
     /**
      * 跳到预览里选中的那一页。V2 的图片区是一页一条目的 [LinearLayoutManager],没有折叠态,
@@ -1258,7 +1100,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
                 val maxHeight = resources.displayMetrics.heightPixels * 3 / 4
                 baseBind.recyclerView.adapter = UgoiraPlayerAdapter(
                     illust, viewLifecycleOwner, maxHeight,
-                    snapshotViewerData?.offlineUgoira(snapshotIsAuto),
                 )
             } else {
                 val adapter = IllustAdapter(mActivity, this@FragmentIllust, illust, recyHeight, false)
@@ -1402,76 +1243,30 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        autoSnapshotEntered = savedInstanceState?.getBoolean(KEY_AUTO_SNAPSHOT_ENTERED, false) ?: false
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putBoolean(KEY_AUTO_SNAPSHOT_ENTERED, autoSnapshotEntered)
     }
 
     override fun onResume() {
         super.onResume()
-        autoSnapshotDemoted = false
         // 大图会话已结束（退出动画播完才 finish、这里才 resume）：联动状态归零。否则
         // viewerSyncedPage 会一直 ≥ 0，让 publishViewportRect 在之后每一次排版空跑。
         viewerViewportSynced = false
         viewerSyncedPage = -1
-        if (!isSnapshotMode) {
-            // 凭证还在手里说明上一次「可见」还没结算（进二级大图页 / 横滑离开再回来）：表不重开、
-            // 不重复计进入，只把停过的那一段接着算。
-            if (autoSnapshotVisit == null) {
-                val autoSnapshotIllust = ObjectPool.get<Illust>(safeArgs.illustId).value
-                autoSnapshotVisit = AutoSnapshotEngine.onArtworkPageVisible(
-                    illustId = safeArgs.illustId,
-                    type = autoSnapshotIllust?.type,
-                    pageCount = autoSnapshotIllust?.page_count ?: 0,
-                    countAsEntry = !autoSnapshotEntered,
-                )
-                autoSnapshotEntered = true
-            } else {
-                // 横滑回来：表被挂起过，从这里接着走（被半透明层盖住时它从没停过，这里是空操作）。
-                AutoSnapshotEngine.onArtworkPageResumed(autoSnapshotVisit)
-            }
-            // 从二级大图页返回后，把进程内已缓存 ORIGINAL 的页直接回填，不重绑列表。
-            (baseBind.recyclerView.adapter as? IllustAdapter)?.showCachedOriginalOverlays()
-        }
+        // 从二级大图页返回后，把进程内已缓存 ORIGINAL 的页直接回填，不重绑列表。
+        (baseBind.recyclerView.adapter as? IllustAdapter)?.showCachedOriginalOverlays()
     }
 
-    override fun onPause() {
-        if (!isSnapshotMode) {
-            // 宿主还 RESUMED ⇒ 是「本页被降级」（横滑到相邻作品），宿主还在、随时会滑回来：
-            // 挂起表，不结算也不评估。被自家半透明层（二级大图页及更上层）盖住、或切后台时
-            // 宿主自己先 paused，这里什么都不做：计时继续走，不结算也不评估。
-            if (autoSnapshotVisit != null && isHostStillResumed()) {
-                AutoSnapshotEngine.onArtworkPageSuspended(autoSnapshotVisit)
-                autoSnapshotDemoted = true
-            }
-        }
-        super.onPause()
-    }
 
     /**
      * 结算并停表。凭证只消费一次，所以 onStop 之后接着来的 onDestroyView 是空操作。
      *
      * [evaluate] 为假用于旋屏：视觉没离开，不该触发生成，但停留确实发生了，记下来不丢。
      */
-    private fun settleAutoSnapshot(evaluate: Boolean) {
-        val visit = autoSnapshotVisit ?: return
-        autoSnapshotVisit = null
-        AutoSnapshotEngine.onArtworkPageLeft(visit, evaluate)
-    }
-
     override fun onStop() {
-        // 宿主停止 = 切后台 / 页面结束；旋屏也走这里，但不算离开，只结算不评估。
-        // 横滑走的页例外：旋屏前它就已经不在视线里了。
-        settleAutoSnapshot(evaluate = autoSnapshotDemoted || activity?.isChangingConfigurations != true)
         super.onStop()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        aiHelper = IllustAiHelper(this, baseBind.root, ensureOverlay = ::ensureAiOverlay)
         // 必须在快照的 early-return 之前：快照详情页同样走这条联动。
         wireViewerPageLink()
         if (isSnapshotMode) return
@@ -1503,7 +1298,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
         mReceiver?.let {
             LocalBroadcastManager.getInstance(mContext).registerReceiver(it, intentFilter)
         }
-        aiHelper?.restoreUpscaleIfRunning(safeArgs.illustId)
     }
 
     override fun onDestroy() {
@@ -1514,8 +1308,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
     }
 
     override fun onDestroyView() {
-        // 兜底：页面被销毁（pager 页回收 / 进程内导航销毁）时把还没结算的那一段交出去。
-        settleAutoSnapshot(evaluate = true)
         try {
             baseBind.recyclerView.adapter = null
         } catch (e: Exception) {
@@ -1533,7 +1325,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
         renderedMenuShape = null
         sheetDeltaY = 0
         loadedAvatarUrl = null
-        aiHelper = null
         // 懒 inflate 的标志随视图销毁归零：视图重建后拿到的是新的 ViewStub，
         // 不归零的话 ensure*() 会误判为「已经建过」而跳过，那两块就再也不出现了。
         abandonedFrameReady = false
@@ -1547,8 +1338,6 @@ class FragmentIllust : BaseLazyFragment<FragmentIllustBinding>() {
     }
 
     companion object {
-        /** 旋屏重建时把「已计过进入」带过去，见 autoSnapshotEntered。 */
-        private const val KEY_AUTO_SNAPSHOT_ENTERED = "auto_snapshot_entered"
 
         @JvmStatic
         fun newInstance(illustId: Long): FragmentIllust {
